@@ -18,6 +18,6 @@ const argv = require('yargs')
 	).argv;
 
 let tree = esprima.parse(fs.readFileSync(argv.source).toString());
-tree = deobfuscateESTree(tree, argv);
+deobfuscateESTree(tree, argv);
 console.log(escodegen.generate(tree));
 
