@@ -19,5 +19,10 @@ const argv = require('yargs')
 
 let tree = esprima.parse(fs.readFileSync(argv.source).toString());
 deobfuscateESTree(tree, argv);
-console.log(escodegen.generate(tree));
+let deobfuscatedSource = escodegen.generate(tree);
+if (typeof argv.destination === 'undefined') {
+	console.log(deobfuscatedSource);
+} else {
+	fs.writeFileSync(argv.destination, deobfuscatedSource);
+}
 
