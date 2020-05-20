@@ -4,7 +4,7 @@ Deobfuscator targetting `javascript-obfuscator@0.28.0`
 This is a hacky project I made over a week, and was mostly a messy exercise in AST analysis and transformations, while also being my first
 node.js project.
 I have achieved source recovery with some small samples, however I wouldn't trust any output to be executable and 1:1 with larger inputs.
-For the most part, the output is meant to be a supplement to reverse-engineering the original sample
+For the most part, the output is meant to be a supplement to reverse-engineering the original sample. 
 Use at your own peril.
 ## Usage
 ```
