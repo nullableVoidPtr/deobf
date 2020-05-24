@@ -2,7 +2,6 @@
   "name": "deobf",
   "version": "0.0.1",
   "description": "AST-level deobfuscation for JavaScript Obfuscator",
-  "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -13,5 +12,8 @@
     "esprima": "^4.0.1",
     "estraverse": "^5.1.0",
     "yargs": "^15.3.1"
+  },
+  "bin": {
+	  "deobf-javascript-obfuscator": "./bin/javascript-obfuscator.js"
   }
 }
