@@ -14,6 +14,7 @@
     "yargs": "^15.3.1"
   },
   "bin": {
-	  "deobf-javascript-obfuscator": "./bin/javascript-obfuscator.js"
+    "deobf-javascript-obfuscator": "./bin/javascript-obfuscator.js",
+    "deobf-terser": "./bin/terser.js"
   }
 }
