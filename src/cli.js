@@ -17,7 +17,7 @@ module.exports = (target, description) => {
 	).argv;
 
 	let tree = esprima.parse(fs.readFileSync(argv.source).toString());
-	target.deobfuscateESTree(tree, argv);
+	target.deobfuscate(tree, argv);
 	let deobfuscatedSource = escodegen.generate(tree);
 	if (typeof argv.destination === 'undefined') {
 		console.log(deobfuscatedSource);
