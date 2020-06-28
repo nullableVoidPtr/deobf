@@ -1,10 +1,10 @@
-const esprima = require('esprima');
-const escodegen = require('escodegen');
-const fs = require('fs');
+import esprima from 'esprima';
+import escodegen from 'escodegen';
+import fs from 'fs';
 
-const yargs = require('yargs')
+import yargs from 'yargs';
 
-module.exports = (target, description) => {
+export default function (target, description) {
 	const argv = yargs.usage('$0 <source> [destination]', description || 'deobfuscate a file',
 		(yargs) => {
 			yargs.options(target.yargsOptions)

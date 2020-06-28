@@ -2,6 +2,7 @@
   "name": "deobf",
   "version": "0.0.1",
   "description": "AST-level deobfuscation for JavaScript Obfuscator",
+  "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },

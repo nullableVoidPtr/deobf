@@ -1,6 +1,6 @@
 #!/usr/bin/env node
+import cli from '../src/cli.js';
+import target from '../lib/targets/TerserTarget.js';
 
-require('../src/cli.js')(
-	require('../lib/targets/TerserTarget.js'),
-	'deobfuscate a Terser minified file');
+target.then(t => cli(t, 'deobfuscate a Terser minified file'));
 
