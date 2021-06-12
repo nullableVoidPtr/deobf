@@ -3,7 +3,8 @@ import escodegen from 'escodegen';
 import fs from 'fs';
 import yargs from 'yargs';
 
-export default (target, description) => {
+export default async (targetName, description) => {
+	let target = await (await import(`../lib/targets/${targetName}Target.js`)).default;
 	const argv = yargs.usage('$0 <source> [destination]', description ?? 'deobfuscate a file',
 		(yargs) => {
 			yargs.options(target.yargsOptions)
@@ -15,9 +16,11 @@ export default (target, description) => {
 		}
 	).argv;
 
+	let deobfuscatedSource;
 	let tree = esprima.parse(fs.readFileSync(argv.source).toString());
 	target.deobfuscate(tree, argv);
-	let deobfuscatedSource = escodegen.generate(tree);
+	deobfuscatedSource = escodegen.generate(tree);
+
 	if (typeof argv.destination === 'undefined') {
 		console.log(deobfuscatedSource);
 	} else {
