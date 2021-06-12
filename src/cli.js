@@ -1,5 +1,5 @@
 import esprima from 'esprima';
-import escodegen from 'escodegen';
+import { generate } from 'astring';
 import fs from 'fs';
 import yargs from 'yargs';
 
@@ -19,7 +19,7 @@ export default async (targetName, description) => {
 	let deobfuscatedSource;
 	let tree = esprima.parse(fs.readFileSync(argv.source).toString());
 	target.deobfuscate(tree, argv);
-	deobfuscatedSource = escodegen.generate(tree);
+	deobfuscatedSource = generate(tree);
 
 	if (typeof argv.destination === 'undefined') {
 		console.log(deobfuscatedSource);
