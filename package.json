@@ -11,6 +11,7 @@
   "dependencies": {
     "acorn": "^7.4.1",
     "astring": "^1.7.5",
+    "escodegen": "^2.0.0",
     "estraverse": "^5.1.0",
     "yargs": "^15.3.1"
   },
