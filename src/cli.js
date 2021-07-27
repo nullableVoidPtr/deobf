@@ -1,4 +1,4 @@
-import esprima from 'esprima';
+import acorn from 'acorn';
 import { generate } from 'astring';
 import fs from 'fs';
 import yargs from 'yargs';
@@ -17,7 +17,7 @@ export default async (targetName, description) => {
 	).argv;
 
 	let deobfuscatedSource;
-	let tree = esprima.parse(fs.readFileSync(argv.source).toString());
+	let tree = acorn.parse(fs.readFileSync(argv.source).toString());
 	target.deobfuscate(tree, argv);
 	deobfuscatedSource = generate(tree);
 

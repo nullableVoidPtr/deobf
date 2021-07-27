@@ -9,8 +9,8 @@
   "author": "nullableVoidPtr",
   "license": "GPL-3.0",
   "dependencies": {
+    "acorn": "^7.4.1",
     "astring": "^1.7.5",
-    "esprima": "^4.0.1",
     "estraverse": "^5.1.0",
     "yargs": "^15.3.1"
   },
