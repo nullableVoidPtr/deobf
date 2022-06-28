@@ -17,7 +17,7 @@ export default async (targetName, description) => {
 	).argv;
 
 	let deobfuscatedSource;
-	let tree = acorn.parse(fs.readFileSync(argv.source).toString());
+	let tree = acorn.parse(fs.readFileSync(argv.source).toString(), {ecmaVersion: 2020});
 	target.deobfuscate(tree, argv);
 	deobfuscatedSource = generate(tree);
 
