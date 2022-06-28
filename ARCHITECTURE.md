@@ -11,7 +11,7 @@ A target is a sequence of passes, specified in `lib/targets/` using the `TargetC
 ```js
 import TargetComposer from './TargetComposer.js';
 
-export default TargetComposer([
+export default await TargetComposer([
 	'BooleanPass',
 	'terser/StatementDelineationPass',
 	[
@@ -22,8 +22,6 @@ export default TargetComposer([
 ```
 
 The only argument passed to `TargetComposer` is a nested array of passes. Each pass can be specified to be repeated until there are no changes, useful for something like `LiteralFoldPass`. Likewise, a sub-array is treated like a pass itself, where the inner array is repeated until there were no changes to the AST.
-
-Due to the dynamic imports inherent in how the target passes are specified, TargetComposer is `async`, hence any Target module exports a promise. This is handled in the command-line scripts, in which the promises are passed to an asynchronous function, within `src/cli.js.
 
 ## Passes
 Passes are implemented in `lib/transforms/`.
