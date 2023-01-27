@@ -27,6 +27,7 @@
     "deobf-terser": "./bin/terser.js"
   },
   "devDependencies": {
+    "0x": "^5.4.1",
     "@types/node": "^18.11.18"
   }
 }

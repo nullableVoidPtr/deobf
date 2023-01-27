@@ -21,6 +21,27 @@ const innerFuncSelector = bq.parse(
         > Identifier.property[name='apply']
     )`
 );
+const debugProtSelector = bq.parse(`ReturnStatement
+    > CallExpression.argument:has(
+        > StringLiteral.arguments.0[value='counter']
+    )
+    > MemberExpression:has(
+        > Identifier.property[name='apply']
+    )
+    > CallExpression.object:has(
+        > MemberExpression.callee
+        > Identifier.property[name='constructor']
+    )
+    > StringLiteral.arguments.0[value='while (true) {}']`);
+const debugCallSelector = bq.parse(`CallExpression
+    > FunctionExpression
+    CallExpression:has(
+        > MemberExpression.callee
+        > Identifier.property[name='setInterval']
+    ):has(
+        > NumericLiteral.arguments.1[value=4000]
+    )
+    > Identifier.arguments.0`);
 
 export default (path: NodePath): boolean => {
     let changed = false;
@@ -118,21 +139,7 @@ export default (path: NodePath): boolean => {
             }
 
             const innerFunc = body[0];
-            const matches = bq.query(
-                innerFunc, 
-                `ReturnStatement
-                > CallExpression.argument:has(
-                    > StringLiteral.arguments.0[value='counter']
-                )
-                > MemberExpression:has(
-                    > Identifier.property[name='apply']
-                )
-                > CallExpression.object:has(
-                    > MemberExpression.callee
-                    > Identifier.property[name='constructor']
-                )
-                > StringLiteral.arguments.0[value='while (true) {}']`
-            );
+            const matches = bq.query(innerFunc, debugProtSelector);
             if (matches.length !== 1) {
                 return;
             }
@@ -147,17 +154,7 @@ export default (path: NodePath): boolean => {
 
                         if (!bq.matches(
                             reference,
-                            bq.parse(
-                                `CallExpression
-                                > FunctionExpression
-                                CallExpression:has(
-                                    > MemberExpression.callee
-                                    > Identifier.property[name='setInterval']
-                                ):has(
-                                    > NumericLiteral.arguments.1[value=4000]
-                                )
-                                > Identifier.arguments.0`
-                            ),
+                            debugCallSelector,
                             {}
                         )) {
                             continue;
