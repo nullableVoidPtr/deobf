@@ -26,51 +26,49 @@ export default (path: NodePath): boolean => {
     let changed = false;
 
     path.traverse({
-        Scopable(path) {
-			for (const binding of Object.values(path.scope.bindings)) {
-				const { path } = binding;
-				if (!path.isVariableDeclarator()) {
-					continue;
-				}
+        VariableDeclarator(path) {
+            const callControllerInit = path.get("init");
+            if (!callControllerInit.isCallExpression()) {
+                return;
+            }
 
-				const callControllerInit = path.get("init");
-				if (!callControllerInit.isCallExpression()) {
-                    continue;
-                }
+            const callController = callControllerInit.get('callee');
+            if (!callController.isFunctionExpression()) {
+                return;
+            }
+            const body = callController.get('body').get('body');
+            if (body.length !== 2) {
+                return;
+            }
 
-                const callController = callControllerInit.get('callee');
-                if (!callController.isFunctionExpression()) {
-                    continue;
-                }
-                const body = callController.get('body').get('body');
-                if (body.length !== 2) {
-                    continue;
-                }
+            const [declarations, returnStmt] = body;
+            if (!declarations.isVariableDeclaration()) {
+                return;
+            }
+            if (!returnStmt.isReturnStatement()) {
+                return;
+            }
 
-                const [declarations, returnStmt] = body;
-                if (!declarations.isVariableDeclaration()) {
-                    continue;
-                }
-                if (!returnStmt.isReturnStatement()) {
-                    continue;
-                }
+            const innerClosure = returnStmt.get('argument');
+            if (!innerClosure.isFunctionExpression()) {
+                return;
+            }
 
-                const innerClosure = returnStmt.get('argument');
-                if (!innerClosure.isFunctionExpression()) {
-                    continue;
-                }
+            const params = innerClosure.get("params");
+            if (params.length !== 2 || !params.every((p) => p.isIdentifier())) {
+                return;
+            }
 
-                const params = innerClosure.get("params");
-                if (params.length !== 2 || !params.every((p) => p.isIdentifier())) {
-                    continue;
-                }
+            if (!bq.matches(innerClosure, innerFuncSelector, {})) {
+                return;
+            }
 
-                if (!bq.matches(innerClosure, innerFuncSelector, {})) {
-                    continue;
-                }
+            const binding = Object.values(path.scope.getAllBindings()).find(b => b.path === path);
+            if (binding == null) {
+                return;
+            }
 
-                const bindingRef = binding.referencePaths[0]
-
+            for (const bindingRef of binding.referencePaths) {
                 const initCall = bindingRef.parentPath;
                 if (initCall == null || !initCall.isCallExpression()) {
                     continue;
@@ -88,6 +86,7 @@ export default (path: NodePath): boolean => {
                     if (wrappedBinding == null) {
                         continue;
                     }
+
                     for (const wrappedRef of wrappedBinding.referencePaths) {
                         if (wrappedRef.isDescendant(wrappedUse)) {
                             continue;
@@ -107,7 +106,9 @@ export default (path: NodePath): boolean => {
                     }
                 }
 
-                path.remove();
+                if (!path.removed) {
+                    path.remove();
+                }
             }
         },
         FunctionDeclaration(path) {
@@ -174,13 +175,11 @@ export default (path: NodePath): boolean => {
 
     const emptyIIFEMatches = bq.query(
         path,
-        bq.parse(
-            `ExpressionStatement:has(
-                > CallExpression
-                > FunctionExpression
-                > BlockStatement[body.length=0]
-            )`
-        ),
+        `ExpressionStatement:has(
+            > CallExpression
+            > FunctionExpression
+            > BlockStatement[body.length=0]
+        )`
     );
     for (const iife of emptyIIFEMatches) {
         iife.remove();

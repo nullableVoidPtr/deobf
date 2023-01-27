@@ -1,6 +1,6 @@
 import * as t from "@babel/types";
-import * as bq from "babylon-query";
 import { NodePath } from "@babel/traverse";
+import * as bq from "babylon-query";
 
 export default (path: NodePath): boolean => {
 	path.traverse({

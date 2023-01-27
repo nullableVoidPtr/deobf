@@ -348,75 +348,100 @@ function findDecoders(
 
 function resolveWrappers(path: NodePath, decoders: Binding[]) {
 	for (const decoder of decoders) {
-		const newReferences: NodePath<t.Node>[] = [];
-
-		for (const refPath of decoder.referencePaths) {
-			if (refPath.key === "init") {
-				const binding = refPath.scope.getOwnBinding(
+		const callRefPathStack = [...decoder.referencePaths];
+		while (callRefPathStack.length > 0) {
+			const callRefPath = callRefPathStack.pop()!;
+			const refAncestry = callRefPath.getAncestry();
+			if (callRefPath.key === "init") {
+				const binding = callRefPath.scope.getOwnBinding(
 					(<t.VariableDeclarator & { id: t.Identifier }>(
-						refPath.parent
+						callRefPath.parent
 					)).id.name
 				);
 				if (binding?.constant) {
 					for (const wrapperRef of binding.referencePaths) {
 						wrapperRef.replaceWith(decoder.identifier);
-						newReferences.push(wrapperRef);
+						decoder.reference(wrapperRef);
+						callRefPathStack.push(wrapperRef);
+					}
+
+					const refIndex = decoder.referencePaths.indexOf(callRefPath);
+					if (refIndex !== -1) {
+						decoder.referencePaths.splice(refIndex, 1);
+						decoder.dereference();
 					}
 					binding.path.remove();
+					binding.scope.removeBinding(binding.identifier.name);
 				}
-			} else if (refPath.key === "callee") {
-				const callRefPathStack = [refPath];
-				while (callRefPathStack.length > 0) {
-					const callRefPath = callRefPathStack.pop()!;
-					const refAncestry = callRefPath.getAncestry();
-					if (refAncestry.length < 3) {
-						continue;
-					}
-					if (!refAncestry[2].isReturnStatement()) {
-						continue;
-					}
+			} else if (callRefPath.key === "callee") {
+				if (refAncestry.length < 3) {
+					continue;
+				}
+				if (!refAncestry[2].isReturnStatement()) {
+					continue;
+				}
 
-					const proxyPath = callRefPath.scope.path; //refPath.ancestry
-					if (!proxyPath.isFunctionDeclaration()) {
-						throw new Error("unexpected call wrapper");
-					}
-					if (proxyPath.node.id == null) {
+				const proxyPath = callRefPath.scope.path; //refPath.ancestry
+				let proxyId: string | null = null;
+				let proxyFunc: NodePath<t.Function> | null = null;
+				if (proxyPath.isFunctionDeclaration()) {
+					proxyId = proxyPath.node.id?.name || null;
+					proxyFunc = proxyPath;
+					if (!proxyId) {
 						throw new Error("call wrapper without identifier");
 					}
-
-					const binding = proxyPath.parentPath.scope.getOwnBinding(
-						proxyPath.node.id.name
-					);
-
-					if (binding?.constant) {
-						for (const wrapperRef of binding.referencePaths) {
-							if (wrapperRef.key !== "callee") {
-								throw new Error(
-									"unexpected reference to wrapper"
-								);
-							}
-							const wrapperCall =
-								wrapperRef.parentPath as NodePath<t.CallExpression>;
-							const args = wrapperCall.node.arguments;
-							if (
-								!args.every((a): a is t.Expression =>
-									t.isExpression(a)
-								)
-							) {
-								throw new Error("unexpected call args");
-							}
-							inlineProxyCall(wrapperCall, proxyPath, args);
-							LiteralFoldPass(wrapperCall);
-							newReferences.push(wrapperRef);
-							callRefPathStack.push(wrapperCall.get("callee"));
+				} else if (proxyPath.isFunctionExpression()) {
+					const { parentPath } = proxyPath;
+					if (parentPath.isVariableDeclarator() && proxyPath.key == "init") {
+						const idPath = parentPath.get('id');
+						if (idPath.isIdentifier()) {
+							proxyId = idPath.node.name;
 						}
-						binding.path.remove();
+						proxyFunc = proxyPath;
 					}
+				}
+
+				if (proxyId == null || proxyFunc == null) {
+					throw new Error("unexpected call wrapper");
+				}
+
+				const binding = proxyPath.parentPath?.scope.getOwnBinding(
+					proxyId
+				);
+
+				if (binding?.constant) {
+					for (const wrapperRef of binding.referencePaths) {
+						if (wrapperRef.key !== "callee") {
+							throw new Error(
+								"unexpected reference to wrapper"
+							);
+						}
+						const wrapperCall =
+							wrapperRef.parentPath as NodePath<t.CallExpression>;
+						const args = wrapperCall.node.arguments;
+						if (
+							!args.every((a): a is t.Expression =>
+								t.isExpression(a)
+							)
+						) {
+							throw new Error("unexpected call args");
+						}
+						inlineProxyCall(wrapperCall, proxyFunc, args);
+						LiteralFoldPass(wrapperCall);
+						decoder.reference(wrapperCall.get("callee"));
+						callRefPathStack.push(wrapperCall.get("callee"));
+					}
+
+					const refIndex = decoder.referencePaths.indexOf(callRefPath);
+					if (refIndex !== -1) {
+						decoder.referencePaths.splice(refIndex, 1);
+						decoder.dereference();
+					}
+					binding.path.remove();
+					binding.scope.removeBinding(binding.identifier.name);
 				}
 			}
 		}
-
-		newReferences.map((r) => decoder.reference(r));
 	}
 }
 
@@ -512,6 +537,17 @@ function analyseRotators(path: NodePath, decoders: Map<Binding, DecoderInfo>) {
 				try {
 					const calculatedValue = script.runInContext(context);
 					if (expectedValueArg.node.value == calculatedValue) {
+						for (const [binding, _] of decoders) {
+							for (const reference of binding.referencePaths) {
+								if (path.isAncestor(reference)) {
+									const refIndex = binding.referencePaths.indexOf(reference);
+									if (refIndex !== -1) {
+										binding.referencePaths.splice(refIndex, 1);
+										binding.dereference();
+									}
+								}
+							}
+						}
 						path.remove();
 						break;
 					}
@@ -536,11 +572,25 @@ export default (path: NodePath): boolean => {
 	resolveWrappers(path, [...decoders.keys()]);
 	analyseRotators(path, decoders);
 
-	for (const [binding, info] of decoders) {
-		if (!info.arrayBinding.path.removed) {
-			info.arrayBinding.path.remove();
+	for (const [binding, { arrayBinding }] of decoders) {
+		if (!arrayBinding.path.removed) {
+			arrayBinding.path.remove();
+			arrayBinding.scope.removeBinding(arrayBinding.identifier.name);
+		}
+
+		for (const [otherBinding, _] of decoders) {
+			for (const reference of [...binding.referencePaths]) {
+				if (otherBinding.path.isAncestor(reference)) {
+					const refIndex = binding.referencePaths.indexOf(reference);
+					if (refIndex !== -1) {
+						binding.referencePaths.splice(refIndex, 1);
+						binding.dereference();
+					}
+				}
+			}
 		}
 		binding.path.remove();
+		binding.scope.removeBinding(binding.identifier.name);
 	}
 
 	for (const [decoderBinding, { decoder }] of decoders) {
@@ -551,10 +601,6 @@ export default (path: NodePath): boolean => {
 
 			const { parentPath } = decoderRef;
 			if (!parentPath?.isCallExpression()) {
-				continue;
-			}
-
-			if (parentPath.find((p) => p.removed)) {
 				continue;
 			}
 

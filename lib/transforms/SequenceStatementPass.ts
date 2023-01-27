@@ -23,6 +23,7 @@ export default (path: NodePath): boolean => {
 				if (path.key == "init") {
 					parentPath.insertBefore(newStatements);
 					expressions.splice(0, newStatements.length);
+					path.replaceWith(expressions[0]);
 				} else if (path.key == "update") {
 					const body = parentPath.get("body");
 					if (body.isBlockStatement()) {
@@ -33,14 +34,18 @@ export default (path: NodePath): boolean => {
 						);
 					}
 					expressions.splice(0, newStatements.length);
+					path.replaceWith(expressions[0]);
 				}
 			} else if (
 				(parentPath.isSwitchStatement() &&
 					path.key == "discriminant") ||
-				parentPath.isReturnStatement()
+				parentPath.isReturnStatement() ||
+				(parentPath.isIfStatement() &&
+					path.key == "test")
 			) {
 				parentPath.insertBefore(newStatements);
 				expressions.splice(0, newStatements.length);
+				path.replaceWith(expressions[0]);
 			}
 		},
 	});

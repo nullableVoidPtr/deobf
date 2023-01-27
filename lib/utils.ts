@@ -43,6 +43,7 @@ export function inlineProxyCall(
 			const name = argMap.get(path.node.name);
 			if (name) {
 				path.replaceWith(name);
+				path.skip();
 			}
 		},
 	});
