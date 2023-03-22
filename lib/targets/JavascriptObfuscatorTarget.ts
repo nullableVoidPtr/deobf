@@ -1,17 +1,23 @@
-import TargetComposer from "./TargetComposer.js";
+import TargetComposer from './TargetComposer.js';
+import * as JSOP from '../transforms/javascript-obfuscator/mod.js';
+import * as BlockStatementPass from '../transforms/BlockStatementPass.js';
+import * as ConditionalStatementPass from '../transforms/ConditionalStatementPass.js';
+import * as LiteralFoldPass from '../transforms/LiteralFoldPass.js';
+import * as SequenceStatementPass from '../transforms/SequenceStatementPass.js';
+import * as DotNotationPass from '../transforms/DotNotationPass.js';
 
-export default await TargetComposer([
-	"BlockStatementPass",
-	["SequenceStatementPass", "ConditionalStatementPass"],
-	"javascript-obfuscator/ControlFlowStoragePass",
-	"LiteralFoldPass",
-	"javascript-obfuscator/StringArrayPass",
-	"LiteralFoldPass",
-	"javascript-obfuscator/ObjectFoldPass",
-	"DotNotationPass",
-	"javascript-obfuscator/ControlFlowStoragePass",
-	"LiteralFoldPass",
-	"javascript-obfuscator/DeadCodeRemovalPass",
-	"javascript-obfuscator/ControlFlowRecoveryPass",
-	"javascript-obfuscator/AntiAnalysisRemovalPass",
+export default TargetComposer([
+	BlockStatementPass,
+	[SequenceStatementPass, ConditionalStatementPass],
+	JSOP.ControlFlowStoragePass,
+	LiteralFoldPass,
+	JSOP.StringArrayPass,
+	LiteralFoldPass,
+	JSOP.ObjectFoldPass,
+	DotNotationPass,
+	JSOP.ControlFlowStoragePass,
+	LiteralFoldPass,
+	JSOP.DeadCodeRemovalPass,
+	JSOP.ControlFlowRecoveryPass,
+	JSOP.AntiAnalysisRemovalPass,
 ]);

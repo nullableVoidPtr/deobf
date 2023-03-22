@@ -1,4 +1,5 @@
 #!/usr/bin/env node
-import cli from "../src/cli.js";
+import YamuObfuscatorTarget from '../lib/targets/YamuObfuscatorTarget.js';
+import cli from '../src/cli.js';
 
-void (await cli('YamuObfuscator', 'deobfuscate a file obfuscated by Javascript Obfuscator'));
+cli(YamuObfuscatorTarget, 'deobfuscate a file obfuscated by Yamu Obfuscator');

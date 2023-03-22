@@ -1,5 +1,5 @@
-import * as t from "@babel/types";
-import { NodePath } from "@babel/traverse";
+import * as t from '@babel/types';
+import { NodePath } from '@babel/traverse';
 
 export const repeatUntilStable = true;
 
@@ -8,7 +8,7 @@ function isPureExpression(path: NodePath<t.Expression>): boolean {
 		// Base case
 		return true;
 	} else if (path.isArrayExpression()) {
-		for (const element of path.get("elements")) {
+		for (const element of path.get('elements')) {
 			if (element === null) {
 				continue;
 			}
@@ -22,12 +22,12 @@ function isPureExpression(path: NodePath<t.Expression>): boolean {
 
 		return true;
 	} else if (path.isObjectExpression()) {
-		for (const property of path.get("properties")) {
+		for (const property of path.get('properties')) {
 			if (!property.isObjectProperty()) {
 				return false;
 			}
 			if (property.node.computed) {
-				const key = property.get("key");
+				const key = property.get('key');
 				if (!key.isExpression()) {
 					return false;
 				} else if (!isPureExpression(key)) {
@@ -35,7 +35,7 @@ function isPureExpression(path: NodePath<t.Expression>): boolean {
 				}
 			}
 
-			const value = property.get("value");
+			const value = property.get('value');
 			if (!value.isExpression()) {
 				return false;
 			}
@@ -47,27 +47,29 @@ function isPureExpression(path: NodePath<t.Expression>): boolean {
 		return true;
 	} else if (path.isUnaryExpression() && path.node.prefix) {
 		switch (path.node.operator) {
-			case "-":
-			case "+":
-			case "!":
-			case "~":
-			case "typeof":
-				return isPureExpression(path.get("argument"));
-			default:
-				return false;
+		case '-':
+		case '+':
+		case '!':
+		case '~':
+		case 'typeof':
+			return isPureExpression(path.get('argument'));
+		default:
+			return false;
 		}
 	} else if (path.isBinaryExpression()) {
-		const left = path.get("left");
-		const right = path.get("right");
+		const left = path.get('left');
+		const right = path.get('right');
 		if (!left.isExpression()) {
 			return false;
 		}
 		return isPureExpression(left) && isPureExpression(right);
 	} else if (path.isLogicalExpression()) {
 		return (
-			isPureExpression(path.get("left")) &&
-			isPureExpression(path.get("right"))
+			isPureExpression(path.get('left')) &&
+			isPureExpression(path.get('right'))
 		);
+	} else if (path.isSequenceExpression()) {
+		return path.get('expressions').every(isPureExpression);
 	}
 	return false;
 }
@@ -81,7 +83,7 @@ export default (path: NodePath): boolean => {
 			if (path.isArrayExpression()) return;
 			if (
 				path.isUnaryExpression() &&
-				path.get("argument").isNumericLiteral()
+				path.get('argument').isNumericLiteral()
 			)
 				return;
 

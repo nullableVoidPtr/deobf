@@ -1,30 +1,11 @@
-import { NodePath } from "@babel/traverse";
-
-type PassSpec = (string | PassSpec)[];
+import { NodePath } from '@babel/traverse';
 
 type BasePass = {
-	transform: (path: NodePath) => boolean;
-	repeatUntilStable: boolean;
-	name: string;
+	default: (path: NodePath) => boolean;
+	repeatUntilStable?: boolean;
 };
 
-type Pass = BasePass | Pass[];
-
-function processPasses(passes: PassSpec): Promise<Pass[]> {
-	return Promise.all(
-		passes.map((pass) =>
-			Array.isArray(pass)
-				? processPasses(pass)
-				: typeof pass === "string"
-				? import(`../transforms/${pass}.js`).then((module) => ({
-						transform: module.default,
-						repeatUntilStable: module.repeatUntilStable,
-						name: pass,
-				  }))
-				: pass
-		)
-	);
-}
+export type PassSpec = (BasePass | PassSpec)[];
 
 function callPass(pass: BasePass, path: NodePath) {
 	/*
@@ -38,25 +19,27 @@ function callPass(pass: BasePass, path: NodePath) {
 	}
 	*/
 
-	const result = pass.transform(path);
+	const result = pass.default(path);
 	path.scope.crawl();
 	return result;
 }
 
-interface Target {
+export interface Target {
+	spec: PassSpec;
 	deobfuscate(path: NodePath): void;
 }
 
-export default async (passes: PassSpec): Promise<Target> => {
-	const processed = await processPasses(passes);
+export default (passes: PassSpec): Target => {
 	return {
+		spec: passes,
 		deobfuscate(path: NodePath) {
-			for (let pass of processed) {
+			for (let passIndex = 0; passIndex < passes.length; passIndex++) {
+				const pass = passes[passIndex];
 				let repeat;
 				do {
 					repeat = false;
 					if (Array.isArray(pass)) {
-						for (let subpass of <BasePass[]>pass) {
+						for (const subpass of <BasePass[]>pass) {
 							repeat = callPass(subpass, path) || repeat;
 						}
 					} else {

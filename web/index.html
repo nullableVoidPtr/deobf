@@ -1,0 +1,71 @@
+<html>
+	<head>
+		<style>
+			html, body, #container {
+				position: absolute;
+				left: 0;
+				top: 0;
+				width: 100%;
+				height: 100%;
+				margin: 0;
+				padding: 0;
+				overflow: hidden;
+			}
+			.cm-editor {
+				height: 100%;
+			}
+			#deobfuscate {
+				position: absolute;
+				right: 0;
+				bottom: 0;
+				z-index: 999;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="html-input"></div>
+		<button id="deobfuscate">Deobfuscate</button>
+
+		<script async type="module">
+			import { deobfuscate } from "./main.js";			
+			import { EditorView, keymap, lineNumbers, drawSelection } from "https://esm.sh/@codemirror/view";
+			import { Compartment, Text } from "https://esm.sh/@codemirror/state";
+			import { defaultKeymap } from "https://esm.sh/@codemirror/commands";
+			import { syntaxHighlighting } from "https://esm.sh/@codemirror/language";
+			import { javascript } from "https://esm.sh/@codemirror/lang-javascript";
+			import { oneDarkTheme, oneDarkHighlightStyle } from "https://esm.sh/@codemirror/theme-one-dark";
+
+			const editor = new EditorView({
+				doc: "hello",
+				extensions: [
+					javascript(),
+					lineNumbers(),
+					drawSelection(),
+					keymap.of(
+						...defaultKeymap,
+					),
+					oneDarkTheme,
+					syntaxHighlighting(oneDarkHighlightStyle, {fallback: true}),
+				],
+				parent: document.body
+			});
+
+			document.getElementById("deobfuscate").addEventListener("click", () => {
+				const { doc } = editor.state;
+				let lines = doc.toJSON();
+				const source = lines.join("\n");
+
+				console.log("deobfuscate", source.length)
+				const output = deobfuscate(source);
+				console.log("done")
+				editor.dispatch({
+					changes: {
+						from: 0,
+						to: doc.length,
+						insert: output
+					}
+				});
+			});
+		</script>
+	</body>
+</html>
