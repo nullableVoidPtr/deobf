@@ -24,9 +24,9 @@ function sortBranch(graph: ControlFlowGraph, parent: string, successors: string[
 	const [left, right] = successors;
 	const leftFlow = graph.getDirectedEdgeAttribute(parent, left, 'flowPredicate');
 	const rightFlow = graph.getDirectedEdgeAttribute(parent, right, 'flowPredicate');
-	if (leftFlow) {
+	if (leftFlow && !rightFlow) {
 		return [right, left];
-	} else if (rightFlow) {
+	} else if (rightFlow && !leftFlow) {
 		return [left, right];
 	} else {
 		throw new Error();

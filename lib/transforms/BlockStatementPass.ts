@@ -19,8 +19,7 @@ export default (path: NodePath): boolean => {
 
 			if (
 				parentPath?.isWithStatement() ||
-				parentPath?.isWhile() ||
-				parentPath?.isFor()
+				parentPath?.isLoop()
 			) {
 				if (path.key == 'body') {
 					path.replaceWith(t.blockStatement([path.node]));

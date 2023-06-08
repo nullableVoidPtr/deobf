@@ -1,44 +1,76 @@
-import * as t from '@babel/types';
 import { NodePath } from '@babel/traverse';
-import * as bq from 'babylon-query';
 
 export default (path: NodePath): boolean => {
+	let removed = false;
 	path.traverse({
-		BlockStatement(path) {
-			const deadCodeMatches = <NodePath<t.IfStatement>[]>(
-				bq.query(path, ':root > IfStatement:has(> BooleanLiteral.test)')
-			);
-			for (const match of deadCodeMatches) {
-				const test = <NodePath<t.BooleanLiteral>>match.get('test');
-				const consequent = match.get('consequent');
-				const alternate = match.get('alternate');
-				if (test.node.value) {
-					if (consequent.isBlockStatement()) {
-						match.replaceWithMultiple(consequent.node.body);
-					} else {
-						match.replaceWith(consequent.node);
-					}
-				} else if (alternate.node != null){
-					if (alternate.isBlockStatement()) {
-						match.replaceWithMultiple(alternate.node.body);
-					} else {
-						match.replaceWith(alternate.node);
-					}
+		IfStatement(path) {
+			const test = path.get('test');
+			if (!test.isBooleanLiteral()) return;
+
+			const consequent = path.get('consequent');
+			const alternate = path.get('alternate');
+			if (test.node.value) {
+				if (consequent.isBlockStatement()) {
+					path.replaceWithMultiple(consequent.node.body);
 				} else {
-					match.remove();
+					path.replaceWith(consequent.node);
 				}
+
+				const { parentPath } = path;
+				if (parentPath.isBlockStatement()) {
+					const firstReturn = parentPath.get('body').find(s => s.isReturnStatement());
+					const after = firstReturn?.getAllNextSiblings();
+					if (after && after?.length > 0) {
+						for (const stmt of after) {
+							stmt.remove();
+						}
+					}
+				}
+
+				alternate.remove();
+			} else if (alternate.node != null){
+				if (alternate.isBlockStatement()) {
+					path.replaceWithMultiple(alternate.node.body);
+				} else {
+					path.replaceWith(alternate.node);
+				}
+				
+				const { parentPath } = path;
+				if (parentPath.isBlockStatement()) {
+					const firstReturn = parentPath.get('body').find(s => s.isReturnStatement());
+					const after = firstReturn?.getAllNextSiblings();
+					if (after && after?.length > 0) {
+						for (const stmt of after) {
+							stmt.remove();
+						}
+					}
+				}
+
+				consequent.remove();
+			} else {
+				path.remove();
 			}
+
+			removed = true;
 		},
 		ConditionalExpression(path) {
 			const test = path.get('test');
+			if (!test.isBooleanLiteral()) return;
+
 			const consequent = path.get('consequent');
 			const alternate = path.get('alternate');
-			if (test.isBooleanLiteral({ value: true })) {
+			if (test.node.value) {
 				path.replaceWith(consequent.node);
-			} else if (test.isBooleanLiteral({ value: false })) {
+			} else {
 				path.replaceWith(alternate.node);
 			}
+
+			removed = true;
 		},
+		Scopable(path) {
+			path.scope.crawl();
+		}
 	});
-	return true;
+
+	return removed;
 };

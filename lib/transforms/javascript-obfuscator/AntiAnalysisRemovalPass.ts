@@ -45,7 +45,7 @@ const debugCallSelector = bq.parse(`CallExpression
         > MemberExpression.callee
         > Identifier.property[name='setInterval']
     ):has(
-        > NumericLiteral.arguments.1[value=4000]
+        > NumericLiteral.arguments.1
     )
     > Identifier.arguments.0`);
 

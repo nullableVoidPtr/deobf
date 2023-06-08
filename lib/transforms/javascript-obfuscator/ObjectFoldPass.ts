@@ -6,7 +6,7 @@ import { dereferencePathFromBinding } from '../../utils.js';
 export const repeatUntilStable = true;
 
 export default (path: NodePath): boolean => {
-	const folded = false;
+	let folded = false;
 	path.traverse({
 		VariableDeclarator(path) {
 			const stmt = path.findParent(p => p.isStatement());
@@ -29,7 +29,7 @@ export default (path: NodePath): boolean => {
 				return;
 			}
 
-			const uncertainReferences = [];
+			const uncertainReferences: NodePath[] = [];
 			for (const reference of binding.referencePaths) {
 				const refStmt = reference.findParent(p => p.isStatement());
 				if (!refStmt || refStmt.parentPath == stmt.parentPath) {
@@ -39,20 +39,28 @@ export default (path: NodePath): boolean => {
 				uncertainReferences.push(reference);
 			}
 
-			for (const reference of uncertainReferences) {
-				if (binding.referencePaths.some(
-					other => other != reference &&
-					other.findParent(p => p.isStatement())?.isAncestor(reference))
-				) {
-					continue;
+			if (uncertainReferences.length === 1) {
+				// disgusting hack to account refs within dead code
+				const reference = uncertainReferences[0];
+				const ifStmt = reference.findParent(p => p.isIfStatement());
+				if (!ifStmt) {
+					return;
 				}
-				return;
+			} else {
+				for (const reference of uncertainReferences) {
+					if (binding.referencePaths.some(
+						other => other != reference &&
+						other.findParent(p => p.isStatement())?.isAncestor(reference))
+					) {
+						continue;
+					}
+
+					return;
+				}
 			}
 
 			for (const reference of [...binding.referencePaths]) {
-				if (uncertainReferences.includes(reference)) {
-					continue;
-				}
+				if (uncertainReferences.includes(reference)) continue;
 
 				const ancestry = reference.getAncestry();
 				const keys: NodePath<t.Expression | t.PrivateName>[] = [];
@@ -75,22 +83,17 @@ export default (path: NodePath): boolean => {
 					keys.push(current.get('property'));
 				}
 
-				if (keys.length === 0) {
-					continue;
-				}
+				const finalKey = keys.at(-1);
+				if (!finalKey) continue;
 
-				if (i == ancestry.length) {
-					continue;
-				}
+				if (i == ancestry.length) continue;
 
 				const assignment = ancestry[i];
-				if (!assignment.isAssignmentExpression()) {
-					continue;
-				}
+				if (!assignment.isAssignmentExpression()) continue;
 
 				let currentObject = init.node;
 				let canFold = true;
-				for (const key of keys.splice(0, keys.length - 1)) {
+				for (const key of keys.slice(0, keys.length - 1)) {
 					const next = <t.ObjectProperty | undefined>(
 						currentObject.properties.find((p) => {
 							if (!t.isObjectProperty(p)) {
@@ -141,7 +144,8 @@ export default (path: NodePath): boolean => {
 						})
 					);
 					if (!next) {
-						throw new Error('unexpected key type');
+						canFold = false;
+						break;
 					}
 
 					if (!t.isObjectExpression(next.value)) {
@@ -152,19 +156,22 @@ export default (path: NodePath): boolean => {
 					currentObject = next.value;
 				}
 				if (canFold) {
+					const computed = !(finalKey.isPrivateName() || finalKey.isIdentifier());
 					currentObject.properties.push(
 						t.objectProperty(
-							keys[0].node,
-							assignment.node.right
+							finalKey.node,
+							assignment.node.right,
+							computed,
 						)
 					);
 					assignment.remove();
 
 					dereferencePathFromBinding(binding, reference);
+					folded = true;
 				}
 			}
 
-			if (binding.referencePaths.length === 1) {
+			if (binding.referencePaths.filter(p => !uncertainReferences.includes(p)).length === 1) {
 				const reference = binding.referencePaths[0];
 				const { parentPath } = reference;
 				if ((parentPath?.isVariableDeclarator() && reference.key == 'init')
@@ -172,6 +179,7 @@ export default (path: NodePath): boolean => {
 					path.remove();
 					binding.scope.removeBinding(binding.identifier.name);
 					reference.replaceWith(init.node);
+					folded = true;
 				}
 			}
 		},

@@ -13,11 +13,13 @@ export default TargetComposer([
 	LiteralFoldPass,
 	JSOP.StringArrayPass,
 	LiteralFoldPass,
-	JSOP.ObjectFoldPass,
-	DotNotationPass,
-	JSOP.ControlFlowStoragePass,
-	LiteralFoldPass,
-	JSOP.DeadCodeRemovalPass,
+	[
+		JSOP.ObjectFoldPass,
+		DotNotationPass,
+		JSOP.ControlFlowStoragePass,
+		LiteralFoldPass,
+		JSOP.DeadCodeRemovalPass,
+	],
 	JSOP.ControlFlowRecoveryPass,
 	JSOP.AntiAnalysisRemovalPass,
 ]);
