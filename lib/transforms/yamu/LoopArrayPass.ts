@@ -15,30 +15,21 @@ export default (path: NodePath): boolean => {
 	path.traverse({
 		VariableDeclarator(path) {
 			const id = path.get('id');
-			if (!id.isIdentifier()) {
-				return;
-			}
+			if (!id.isIdentifier()) return;
+
 			const binding = path.scope.getBinding(id.node.name);
-			if (!binding) {
-				return;
-			}
+			if (!binding) return;
 
 			const init = path.get('init');
-			if (!init.isCallExpression()) {
-				return;
-			}
+			if (!init.isCallExpression()) return;
 
 			const args = init.get('arguments');
-			if (args.length != 2) {
-				return;
-			}
-
-			if (!(args[0].isNumericLiteral() && args[1].isNumericLiteral())) {
-				return;
-			}
+			if (args.length != 2) return;
+			if (!args[0].isNumericLiteral()) return;
+			if (!args[1].isNumericLiteral()) return;
 
 			const resolver = reverseIdx(args[0].node.value, args[1].node.value);
-            
+
 			const toReplace: [NodePath<t.MemberExpression>, t.NumericLiteral][] = []
 			for (const ref of binding.referencePaths) {
 				const indices: number[] = [];
@@ -46,26 +37,19 @@ export default (path: NodePath): boolean => {
 				let i = 1;
 				for (; i < ancestry.length; i++) {
 					const current = ancestry[i];
-					if (!current.isMemberExpression()) {
-						break;
-					}
-
-					if (current.key == 'property') {
-						break;
-					}
+					if (!current.isMemberExpression()) break;
+					if (current.key == 'property') break;
 
 					const property = current.get('property');
-					if (!property.isNumericLiteral()) {
-						return;
-					}
+					if (!property.isNumericLiteral()) return;
 
 					indices.push(property.node.value);
 				}
 
+				if (indices.length === 0) return;
+
 				const previous = ancestry[i - 1];
-				if (indices.length === 0 || !previous.isMemberExpression()) {
-					return;
-				}
+				if (!previous.isMemberExpression()) return;
 
 				toReplace.push([previous, t.numericLiteral(resolver(indices))])
 			}

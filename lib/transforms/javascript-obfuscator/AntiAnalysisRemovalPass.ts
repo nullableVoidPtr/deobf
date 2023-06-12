@@ -1,7 +1,7 @@
 import * as t from '@babel/types';
 import { NodePath } from '@babel/traverse';
 import * as bq from 'babylon-query';
-                
+
 const innerFuncSelector = bq.parse(
 	`FunctionExpression:has(VariableDeclarator
         > ConditionalExpression.init:has(
@@ -65,7 +65,7 @@ function findDomainLock(path: NodePath): string[] | null {
 		return null;
 	}
 	const delimiter = delimiterPath.node.value;
-	
+
 	const obfuscatedDomainsPath = domainLockCall.get('callee.object.callee.object') as NodePath;
 	if (!obfuscatedDomainsPath.isStringLiteral()) {
 		return null;
@@ -77,23 +77,15 @@ function findDomainLock(path: NodePath): string[] | null {
 		Identifier(regexId) {
 			const binding = regexId.scope.getBinding(regexId.node.name);
 			const varPath = binding?.path
-			if (!varPath?.isVariableDeclarator()) {
-				return;
-			}
+			if (!varPath?.isVariableDeclarator()) return;
 
 			const regexCall = varPath.get('init');
-			if (!regexCall.isNewExpression()) {
-				return;
-			}
-			if (!regexCall.get('callee').isIdentifier({name: 'RegExp'})) {
-				return;
-			}
+			if (!regexCall.isNewExpression()) return;
+			if (!regexCall.get('callee').isIdentifier({name: 'RegExp'})) return;
+
 			const regexArgs: string[] = [];
 			for (const arg of regexCall.get('arguments')) {
-				if (!arg.isStringLiteral()) {
-					return;
-				}
-
+				if (!arg.isStringLiteral()) return;
 				regexArgs.push(arg.node.value);
 			}
 
@@ -124,69 +116,44 @@ export default (treePath: NodePath): boolean => {
 	treePath.traverse({
 		VariableDeclarator(varPath) {
 			const callControllerInit = varPath.get('init');
-			if (!callControllerInit.isCallExpression()) {
-				return;
-			}
+			if (!callControllerInit.isCallExpression()) return;
 
 			const callController = callControllerInit.get('callee');
-			if (!callController.isFunctionExpression()) {
-				return;
-			}
+			if (!callController.isFunctionExpression()) return;
 			const body = callController.get('body.body') as NodePath<t.Statement>[];
-			if (body.length !== 2) {
-				return;
-			}
+			if (body.length !== 2) return;
 
 			const [declarations, returnStmt] = body;
-			if (!declarations.isVariableDeclaration()) {
-				return;
-			}
-			if (!returnStmt.isReturnStatement()) {
-				return;
-			}
+			if (!declarations.isVariableDeclaration()) return;
+			if (!returnStmt.isReturnStatement()) return;
 
 			const innerClosure = returnStmt.get('argument');
-			if (!innerClosure.isFunctionExpression()) {
-				return;
-			}
+			if (!innerClosure.isFunctionExpression()) return;
 
 			const params = innerClosure.get('params');
-			if (params.length !== 2 || !params.every((p) => p.isIdentifier())) {
-				return;
-			}
+			if (params.length !== 2) return;
+			if (!params.every((p) => p.isIdentifier())) return;
 
-			if (!bq.matches(innerClosure, innerFuncSelector, {})) {
-				return;
-			}
+			if (!bq.matches(innerClosure, innerFuncSelector, {})) return;
 
 			const binding = Object.values(varPath.scope.getAllBindings()).find(b => b.path === varPath);
-			if (!binding) {
-				return;
-			}
+			if (!binding) return;
 
 			for (const bindingRef of binding.referencePaths) {
 				const initCall = bindingRef.parentPath;
-				if (!initCall || !initCall.isCallExpression()) {
-					continue;
-				}
+				if (!initCall?.isCallExpression()) continue;
 
 				const wrappedUse = initCall.parentPath;
 				if (wrappedUse?.isVariableDeclarator()) {
 					const wrappedAssignmentLeft = wrappedUse.get('id');
-					if (!wrappedAssignmentLeft.isIdentifier()) {
-						continue;
-					}
+					if (!wrappedAssignmentLeft.isIdentifier()) continue;
+
 					const wrappedId = wrappedAssignmentLeft.node.name;
-                    
 					const wrappedBinding = wrappedUse.scope.getBinding(wrappedId);
-					if (!wrappedBinding) {
-						continue;
-					}
+					if (!wrappedBinding) continue;
 
 					for (const wrappedRef of wrappedBinding.referencePaths) {
-						if (wrappedRef.isDescendant(wrappedUse)) {
-							continue;
-						}
+						if (wrappedRef.isDescendant(wrappedUse)) continue;
 						if (wrappedRef.parentPath?.isCallExpression()) {
 							wrappedRef.parentPath.remove();
 							changed = true;
@@ -216,31 +183,23 @@ export default (treePath: NodePath): boolean => {
 		},
 		FunctionDeclaration(path) {
 			const body = path.get('body.body') as NodePath<t.Statement>[];
-			if (body.length !== 2) {
-				return;
-			}
+			if (body.length !== 2) return;
 
 			const innerFunc = body[0];
 			const matches = bq.query(innerFunc, debugProtSelector);
-			if (matches.length !== 1) {
-				return;
-			}
+			if (matches.length !== 1) return;
 
 			if (path.node.id) {
 				const binding = path.scope.getBinding(path.node.id.name);
 				if (binding) {
 					for (const reference of binding.referencePaths) {
-						if (path.isAncestor(reference)) {
-							continue;
-						}
+						if (path.isAncestor(reference)) continue;
 
 						if (!bq.matches(
 							reference,
 							debugCallSelector,
 							{}
-						)) {
-							continue;
-						}
+						)) continue;
 
 						const outerDebugProtFunc = reference.getFunctionParent()?.parentPath;
 						if (!outerDebugProtFunc) {

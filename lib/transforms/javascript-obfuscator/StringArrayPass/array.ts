@@ -56,11 +56,10 @@ function analyseStringArrayFunction(
 		},
 	}, state);
 
-	if (!state.isStringArrayFunction || 
-		!state.arrayIdentifier || 
-		!state.arrayData) {
-		return null;
-	}
+	if (!state.isStringArrayFunction) return null;
+	if (!state.arrayIdentifier) return null;
+	if (!state.arrayData) return null;
+
 	const binding = funcDecl.scope.getBinding(funcDeclIdPath.node.name);
 	if (!binding) {
 		return null;

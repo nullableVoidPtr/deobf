@@ -34,7 +34,7 @@ export default (path: NodePath): boolean => {
 				} else {
 					path.replaceWith(alternate.node);
 				}
-				
+
 				const { parentPath } = path;
 				if (parentPath.isBlockStatement()) {
 					const firstReturn = parentPath.get('body').find(s => s.isReturnStatement());

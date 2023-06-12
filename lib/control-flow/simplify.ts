@@ -29,16 +29,16 @@ function sortBranch(graph: ControlFlowGraph, parent: string, successors: string[
 	} else if (rightFlow && !leftFlow) {
 		return [left, right];
 	} else {
-		throw new Error();
+		throw new TypeError();
 	}
 }
 
 export function pushAfterStatements(graph: ControlFlowGraph) {
 	graph.forEachNode((node, block) => {
-		if (!block.afterStatements || block.afterStatements.length === 0) {
-			return;
-		}
+		if (!block.afterStatements) return;
 		const { afterStatements } = block;
+		if (afterStatements.length === 0) return;
+
 		const edges = graph.outEdgeEntries(node);
 		for (const edge of edges) {
 			const newNode = `${edge}:between`;
@@ -86,7 +86,7 @@ function reduceSequence(graph: ControlFlowGraph) {
 		while (!graph.hasNode(actualParent)) {
 			const grandparentEntry = [...parents.entries()].find(([_, descendant]) => descendant === actualParent);
 			if (!grandparentEntry) {
-				throw new Error();
+				throw new TypeError();
 			}
 
 			[actualParent] = grandparentEntry;
@@ -208,7 +208,11 @@ function reduceSimpleDoWhile(graph: ControlFlowGraph) {
 		const [falsyBranch, _] = sortBranch(graph, header, successors);
 
 		const attributes = graph.getNodeAttributes(header);
-		let test = attributes.test!;
+		let { test } = attributes;
+		if (!test) {
+			throw new TypeError();
+		}
+
 		if (header === falsyBranch) {
 			test = t.unaryExpression('!', test);
 		}
@@ -222,7 +226,7 @@ function reduceSimpleDoWhile(graph: ControlFlowGraph) {
 
 		const edges = graph.outEdges(header);
 		if (edges.length !== 1) {
-			throw new Error();
+			throw new TypeError();
 		}
 
 		graph.setEdgeAttribute(edges[0], 'flowPredicate', true);
@@ -239,7 +243,7 @@ function reduceSimpleIf(graph: ControlFlowGraph) {
 
 		const successors = graph.outNeighbors(header);
 		if (successors.length !== 2) {
-			throw new Error();
+			throw new TypeError();
 		}
 
 		const [left, right] = successors;

@@ -60,7 +60,11 @@ function resolveFuncWrapper(decoder: Binding, reference: NodePath): NodePath[] {
 	}
 
 	if (!proxyId || !proxyFunc) {
-		throw new Error('unexpected call wrapper');
+		return [];
+	}
+	const proxyBody = proxyFunc.get('body');
+	if (proxyBody.isBlockStatement() && proxyBody.node.body.length > 1) {
+		return [];
 	}
 
 	const binding = proxyPath.parentPath?.scope.getOwnBinding(

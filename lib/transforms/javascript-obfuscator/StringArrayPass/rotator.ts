@@ -49,9 +49,7 @@ function evalRotatePredicate(node: t.Expression): number {
 	traverse(top, {
 		noScope: true,
 		CallExpression(parseIntCallPath) {
-			if (!parseIntCallPath.get('callee').isIdentifier({name: 'parseInt'})) {
-				return;
-			}
+			if (!parseIntCallPath.get('callee').isIdentifier({name: 'parseInt'})) return;
 
 			const value = parseIntCallPath.node.extra?.['value'];
 			if (typeof value != 'number') {
@@ -61,9 +59,7 @@ function evalRotatePredicate(node: t.Expression): number {
 			parseIntCallPath.replaceWith(t.numericLiteral(value));
 		},
 		exit(topExprPath) {
-			if (topExprPath.parentPath) {
-				return;
-			}
+			if (topExprPath.parentPath) return;
 
 			const state = topExprPath.evaluate();
 			if (state.confident && typeof state.value == 'number') {
@@ -88,29 +84,25 @@ export default function analyseRotators(decoders: Map<Binding, DecoderInfo>) {
 		const arrayArgRef = arrayBinding.referencePaths.find(
 			p => p.listKey == 'arguments' && p.key == 0
 		);
-		if (!arrayArgRef) {
-			continue;
-		}
+		if (!arrayArgRef) continue;
+
 		const rotatorIifePath = arrayArgRef?.parentPath;
-		if (!rotatorIifePath?.isCallExpression()) {
-			continue;
-		}
+		if (!rotatorIifePath?.isCallExpression()) continue;
 
 		const args = rotatorIifePath.get('arguments');
-		if (args.length !== 2 || !args[1].isNumericLiteral()) {
-			return;
-		}
-		const expectedValueArg = args[1];
+		if (args.length !== 2) return;
+		if (!args[1].isNumericLiteral()) return;
 
+		const expectedValueArg = args[1];
 		const state: {
 			rotatePredicate?: NodePath<t.Expression>;
 		} = {}
 		rotatorIifePath.traverse({
 			VariableDeclarator(varPath) {
 				const init = varPath.get('init');
-				if (!init.isExpression() || !isRotatePredicate(init)) {
-					return;
-				}
+				if (!init.isExpression()) return;
+				if (!isRotatePredicate(init)) return;
+
 				this.rotatePredicate = init;
 				varPath.stop();
 			},
@@ -125,21 +117,15 @@ export default function analyseRotators(decoders: Map<Binding, DecoderInfo>) {
 		rotatePredicate.traverse({
 			CallExpression(decoderCallPath) {
 				const parseIntCallPath = decoderCallPath.parentPath;
-				if (!parseIntCallPath.isCallExpression()) {
-					return;
-				}
-				if (!parseIntCallPath.get('callee').isIdentifier({name: 'parseInt'})) {
-					return;
-				}
+				if (!parseIntCallPath.isCallExpression()) return;
+				if (!parseIntCallPath.get('callee').isIdentifier({name: 'parseInt'})) return;
 
 				const calleePath = decoderCallPath.get('callee');
-				if (!calleePath.isIdentifier()) {
-					return;
-				}
+				if (!calleePath.isIdentifier()) return;
+
 				const decoderEntry = [...decoders.entries()].find(([b, _]) => b.referencePaths.includes(calleePath));
-				if (!decoderEntry) {
-					return;
-				}
+				if (!decoderEntry) return;
+
 				const decoderFunc = decoderEntry[1].decoder;
 
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -205,10 +191,7 @@ export default function analyseRotators(decoders: Map<Binding, DecoderInfo>) {
 
 			for (const [binding, _] of decoders) {
 				for (const reference of binding.referencePaths) {
-					if (!rotatorIifePath.isAncestor(reference)) {
-						continue;
-					}
-
+					if (!rotatorIifePath.isAncestor(reference)) continue;
 					dereferencePathFromBinding(binding, reference);
 				}
 			}

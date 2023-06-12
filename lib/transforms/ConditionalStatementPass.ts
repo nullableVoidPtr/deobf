@@ -23,9 +23,8 @@ export default (path: NodePath): boolean => {
 				changed = true;
 			} else if (expression.isLogicalExpression()) {
 				let test = expression.node.left;
-				if (expression.node.operator == '??') {
-					return;
-				} else if (expression.node.operator == '||') {
+				if (expression.node.operator == '??') return;
+				if (expression.node.operator == '||') {
 					if (t.isUnaryExpression(test, {operator: '!', prefix: true})) {
 						test = test.argument;
 					} else {
@@ -49,14 +48,10 @@ export default (path: NodePath): boolean => {
 		IfStatement: {
 			exit(path) {
 				const alternate = path.get('alternate');
-				if (!alternate.isBlockStatement()) {
-					return;
-				}
+				if (!alternate.isBlockStatement()) return;
 
 				const inlineMatches = bq.query(alternate, 'BlockStatement:root[body.length=1] > IfStatement.body.0');
-				if (inlineMatches.length !== 1) {
-					return;
-				}
+				if (inlineMatches.length !== 1) return;
 
 				alternate.replaceWith(inlineMatches[0]);
 				changed = true;
@@ -78,10 +73,8 @@ export default (path: NodePath): boolean => {
 				changed = true;
 			} else if (expression.isLogicalExpression()) {
 				let test = expression.node.left;
-				let value: boolean | null = null;
-				if (expression.node.operator == '??') {
-					return;
-				} else if (expression.node.operator == '&&') {
+				let value: boolean;
+				if (expression.node.operator == '&&') {
 					value = false;
 					if (t.isUnaryExpression(test, {operator: '!', prefix: true})) {
 						test = test.argument;
@@ -90,9 +83,7 @@ export default (path: NodePath): boolean => {
 					}
 				} else if (expression.node.operator == '||') {
 					value = true;
-				}
-
-				if (value === null) {
+				} else {
 					return;
 				}
 

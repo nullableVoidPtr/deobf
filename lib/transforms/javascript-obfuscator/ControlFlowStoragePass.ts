@@ -36,9 +36,7 @@ export default (path: NodePath): boolean => {
 					if (binding.kind != 'var') return;
 				}
 
-				if (binding.referencePaths.some(p => objExpPath.isAncestor(p))) {
-					return;
-				}
+				if (binding.referencePaths.some(p => objExpPath.isAncestor(p))) return;
 
 				const properties = objExpPath.get('properties');
 				if (properties.length === 0) return;
@@ -74,9 +72,8 @@ export default (path: NodePath): boolean => {
 				const unreplacedReferences = [];
 				for (const reference of [...binding.referencePaths].reverse()) {
 					const { parentPath } = reference;
-					if (!parentPath || parentPath.find(p => p.removed)) {
-						continue;
-					}
+					if (!parentPath) continue;
+					if (parentPath.find(p => p.removed)) continue;
 
 					if (!parentPath?.isMemberExpression()) {
 						unreplacedReferences.push(reference);
@@ -95,7 +92,7 @@ export default (path: NodePath): boolean => {
 						unreplacedReferences.push(reference);
 						continue;
 					}
-					
+
 					const valuePath = propertyMap.get(key);
 					if (!valuePath) {
 						unreplacedReferences.push(reference);
@@ -122,44 +119,32 @@ export default (path: NodePath): boolean => {
 						// undo some overzealous deobfuscation
 						undo: {
 							const body = valuePath.get('body');
-							if (!body.isBlockStatement()) {
-								break undo;
-							}
+							if (!body.isBlockStatement()) break undo;
+
 							const stmts = body.get('body');
-							if (stmts.length !== 2) {
-								break undo;
-							}
+							if (stmts.length !== 2) break undo;
+
 							const [ifStmt, returnStmt] = stmts;
-							if (!ifStmt.isIfStatement()) {
-								break undo;
-							}
-							if (!returnStmt.isReturnStatement()) {
-								break undo;
-							}
+							if (!ifStmt.isIfStatement()) break undo;
+
+							if (!returnStmt.isReturnStatement()) break undo;
+
 							const returnArg = returnStmt.get('argument');
-							if (!returnArg.isExpression()) {
-								break undo;
-							}
-							
+							if (!returnArg.isExpression()) break undo;
+
 							const ifBody = ifStmt.get('consequent');
-							if (!ifBody.isBlockStatement()) {
-								break undo;
-							}
+							if (!ifBody.isBlockStatement()) break undo;
 
 							const ifTest = ifStmt.get('test');
 							const ifBodyStmts = ifBody.get('body');
-							if (ifBodyStmts.length !== 1) {
-								break undo;
-							}
+							if (ifBodyStmts.length !== 1) break undo;
+
 							const [consequentReturn] = ifBodyStmts;
-							if (!consequentReturn.isReturnStatement()) {
-								break undo;
-							}
+							if (!consequentReturn.isReturnStatement()) break undo;
+
 							const consequentReturnArg = consequentReturn.get('argument');
-							if (!consequentReturnArg.isBooleanLiteral()) {
-								break undo;
-							}
-							
+							if (!consequentReturnArg.isBooleanLiteral()) break undo;
+
 							if (consequentReturnArg.node.value) {
 								ifStmt.remove();
 								returnArg.replaceWith(t.logicalExpression('||', ifTest.node, returnArg.node));
@@ -170,7 +155,7 @@ export default (path: NodePath): boolean => {
 								} else {
 									predicate = t.unaryExpression('!', predicate);
 								}
-								
+
 								ifStmt.remove();
 								returnArg.replaceWith(t.logicalExpression('&&', predicate, returnArg.node));
 							}
@@ -212,7 +197,7 @@ export default (path: NodePath): boolean => {
 			exit(path) {
 				const storages = this.parentScopes.get(path.scope);
 				if (!storages) return;
-			
+
 				for (const { binding, propertyMap, mutated } of storages) {
 					if (!mutated) {
 						const { parentPath } = binding.path;

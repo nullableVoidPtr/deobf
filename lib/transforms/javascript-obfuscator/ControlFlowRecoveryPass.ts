@@ -22,7 +22,7 @@ export default (path: NodePath): boolean => {
 				> Identifier.id
 			):has(
 				> CallExpression.init:has(
-					> StringLiteral.arguments.0
+					> StringLiteral.arguments.0[value!='']
 				)
 				> MemberExpression.callee:has(
 					> Identifier.property[name='split']

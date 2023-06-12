@@ -9,9 +9,7 @@ function isPureExpression(path: NodePath<t.Expression>): boolean {
 		return true;
 	} else if (path.isArrayExpression()) {
 		for (const element of path.get('elements')) {
-			if (element === null) {
-				continue;
-			}
+			if (element === null) continue;
 			if (!element.isExpression()) {
 				return false;
 			}

@@ -5,9 +5,7 @@ export default (path: NodePath): boolean => {
 	const changed = false;
 	path.traverse({
 		Statement(path) {
-			if (path.isBlockStatement()) {
-				return;
-			}
+			if (path.isBlockStatement()) return;
 
 			const { parentPath } = path;
 			if (parentPath?.isIfStatement()) {

@@ -10,31 +10,22 @@ export default (path: NodePath): boolean => {
 	path.traverse({
 		VariableDeclarator(path) {
 			const stmt = path.findParent(p => p.isStatement());
-			if (!stmt) {
-				return;
-			}
+			if (!stmt) return;
 
 			const init = path.get('init');
-			if (!init.isObjectExpression()) {
-				return;
-			}
+			if (!init.isObjectExpression()) return;
 
 			const id = path.get('id');
-			if (!id.isIdentifier()) {
-				return;
-			}
+			if (!id.isIdentifier()) return;
 
 			const binding = path.scope.getBinding(id.node.name);
-			if (!binding) {
-				return;
-			}
+			if (!binding) return;
 
 			const uncertainReferences: NodePath[] = [];
 			for (const reference of binding.referencePaths) {
 				const refStmt = reference.findParent(p => p.isStatement());
-				if (!refStmt || refStmt.parentPath == stmt.parentPath) {
-					continue;
-				}
+				if (!refStmt) continue;
+				if (refStmt.parentPath == stmt.parentPath) continue;
 
 				uncertainReferences.push(reference);
 			}
@@ -43,17 +34,13 @@ export default (path: NodePath): boolean => {
 				// disgusting hack to account refs within dead code
 				const reference = uncertainReferences[0];
 				const ifStmt = reference.findParent(p => p.isIfStatement());
-				if (!ifStmt) {
-					return;
-				}
+				if (!ifStmt) return;
 			} else {
 				for (const reference of uncertainReferences) {
 					if (binding.referencePaths.some(
 						other => other != reference &&
 						other.findParent(p => p.isStatement())?.isAncestor(reference))
-					) {
-						continue;
-					}
+					) continue;
 
 					return;
 				}
@@ -67,17 +54,11 @@ export default (path: NodePath): boolean => {
 				let i = 1;
 				for (; i < ancestry.length; i++) {
 					const current = ancestry[i];
-					if (!current.isMemberExpression()) {
-						break;
-					}
+					if (!current.isMemberExpression()) break;
 
 					if (current.key != 'object') {
-						if (
-							!current.parentPath?.isAssignmentExpression() ||
-							current.key != 'left'
-						) {
-							break;
-						}
+						if (!current.parentPath?.isAssignmentExpression()) break;
+						if (current.key != 'left') break;
 					}
 
 					keys.push(current.get('property'));

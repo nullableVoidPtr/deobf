@@ -7,24 +7,16 @@ export default (path: NodePath): boolean => {
 	path.traverse({
 		CallExpression(path) {
 			const calleePath = path.get('callee');
-			if (!calleePath.isSequenceExpression()) {
-				return;
-			}
+			if (!calleePath.isSequenceExpression()) return;
+
 			const seqExprPaths = calleePath.get('expressions');
-			if (seqExprPaths.length !== 2) {
-				return;
-			}
-			if (!seqExprPaths[0].isNumericLiteral({value: 1})) {
-				return;
-			}
-			if (!seqExprPaths[1].isIdentifier({name: 'eval'})) {
-				return;
-			}
+			if (seqExprPaths.length !== 2) return;
+			if (!seqExprPaths[0].isNumericLiteral({value: 1})) return;
+			if (!seqExprPaths[1].isIdentifier({name: 'eval'})) return;
 
 			const argPaths = path.get('arguments');
-			if (argPaths.length !== 1 || argPaths[0].isStringLiteral({value: 'this'})) {
-				return;
-			}
+			if (argPaths.length !== 1) return;
+			if (argPaths[0].isStringLiteral({value: 'this'})) return;
 
 			path.replaceWith(t.identifier('window'));
 			changed = true;

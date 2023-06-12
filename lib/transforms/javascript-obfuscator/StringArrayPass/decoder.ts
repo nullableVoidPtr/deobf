@@ -76,38 +76,28 @@ export default function findDecoders(
 	for (const [binding, data] of arrayCandidates) {
 		for (const reference of binding.referencePaths) {
 			const { scope } = reference;
-			if (scope.path === binding.path) {
-				continue;
-			}
+			if (scope.path === binding.path) continue;
 
 			const func = scope.path;
 			let decoderId: NodePath<t.Identifier>;
 			if (func.isFunctionDeclaration()) {
 				const params = func.get('params');
-				if (params.length !== 2 || !params.every((p) => p.isIdentifier())) {
-					continue;
-				}
+				if (params.length !== 2) continue;
+				if (!params.every((p) => p.isIdentifier())) continue;
 
 				const idPath = func.get('id');
-				if (!idPath.isIdentifier()) {
-					continue;
-				}
+				if (!idPath.isIdentifier()) continue;
 				decoderId = idPath;
 			} else if (func.isFunctionExpression()) {
 				const params = func.get('params');
-				if (params.length !== 2 || !params.every((p) => p.isIdentifier())) {
-					continue;
-				}
+				if (params.length !== 2) continue;
+				if (!params.every((p) => p.isIdentifier())) continue;
 
 				const varPath = func.parentPath;
-				if (!varPath.isVariableDeclarator()) {
-					continue;
-				}
+				if (!varPath.isVariableDeclarator()) continue;
 
 				const idPath = varPath.get('id');
-				if (!idPath.isIdentifier()) {
-					continue;
-				}
+				if (!idPath.isIdentifier()) continue;
 				decoderId = idPath;
 			} else {
 				continue;
@@ -161,7 +151,7 @@ export default function findDecoders(
 
 			decoderPath = valuePath;
 		}
-		
+
 		if (!decoderPath.isFunction()) {
 			throw new Error('decoder with no function');
 		}
@@ -217,21 +207,15 @@ export default function findDecoders(
 				}
 			},
 			FunctionExpression(atobPath: NodePath<t.FunctionExpression>) {
-				if (this.isBase64) {
-					return;
-				}
+				if (this.isBase64) return;
 
-				if (!atobPath.parentPath?.isVariableDeclarator()) {
-					return;
-				}
+				if (!atobPath.parentPath?.isVariableDeclarator()) return;
 				atobPath.traverse({
 					ConditionalExpression(
 						path: NodePath<t.ConditionalExpression>
 					) {
 						const { node } = path;
-						if (!t.isNumericLiteral(node.alternate, { value: 0 })) {
-							return;
-						}
+						if (!t.isNumericLiteral(node.alternate, { value: 0 })) return;
 
 						const appendSelector = bq.parse(
 							`ConditionalExpression:root:has(
@@ -247,18 +231,14 @@ export default function findDecoders(
 							appendSelector,
 							{},
 						);
-						if (!appendMatch) {
-							return;
-						}
+						if (!appendMatch) return;
 
 						this.isBase64 = true;
 						path.stop();
 					},
 				}, this);
 
-				if (!this.isBase64) {
-					return;
-				}
+				if (!this.isBase64) return;
 
 				this.isBase64 = false; 
 				atobPath.traverse({
@@ -266,9 +246,7 @@ export default function findDecoders(
 						if (
 							!charMapPath.parentPath?.isVariableDeclarator() ||
 							charMapPath.node.value == ''
-						) {
-							return;
-						}
+						) return;
 						this.curry = b64DecCurry(this.curry, charMapPath.node.value);
 						this.isBase64 = true;
 						charMapPath.stop();
@@ -283,9 +261,7 @@ export default function findDecoders(
 					!t.isBinaryExpression(encryptExprPath.node.right.property, {
 						operator: '%',
 					})
-				) {
-					return;
-				}
+				) return;
 				this.curry = rc4Curry(this.curry);
 				encryptExprPath.stop();
 			},

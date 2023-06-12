@@ -9,9 +9,8 @@ export default (path: NodePath): boolean => {
 			const calleePath = path.get('callee');
 			if (calleePath.matchesPattern('String.fromCharCode') || calleePath.matchesPattern('window.String.fromCharCode')) {
 				const argPaths = path.get('arguments');
-				if (!argPaths.every((a) => a.isNumericLiteral())) {
-					return;
-				}
+				if (!argPaths.every((a) => a.isNumericLiteral())) return;
+
 				const args = (argPaths as NodePath<t.NumericLiteral>[]).map(a => a.node.value);
 				path.replaceWith(t.stringLiteral(String.fromCharCode(...args)));
 				changed = true;
@@ -20,10 +19,10 @@ export default (path: NodePath): boolean => {
 		BinaryExpression: {
 			exit(path) {
 				const left = path.get('left');
+				if (!left.isStringLiteral()) return;
 				const right = path.get('right');
-				if (!left.isStringLiteral() || !right.isStringLiteral()) {
-					return;
-				}
+				if (!right.isStringLiteral()) return;
+
 				const value = left.node.value + right.node.value;
 				path.replaceWith(t.stringLiteral(value))
 				changed = true;

@@ -15,9 +15,7 @@ function removeDecoders(decoders: Map<Binding, DecoderInfo>) {
 
 		for (const [otherBinding, _] of decoders) {
 			for (const reference of [...binding.referencePaths]) {
-				if (!otherBinding.path.isAncestor(reference)) {
-					continue;
-				}
+				if (!otherBinding.path.isAncestor(reference)) continue;
 
 				dereferencePathFromBinding(binding, reference);
 			}
@@ -31,14 +29,10 @@ function removeDecoders(decoders: Map<Binding, DecoderInfo>) {
 function replaceDecoderCalls(decoders: Map<Binding, DecoderInfo>) {
 	for (const [decoderBinding, { decoder }] of decoders) {
 		for (const decoderRef of decoderBinding.referencePaths) {
-			if (decoderRef.key !== 'callee') {
-				continue;
-			}
+			if (decoderRef.key !== 'callee') continue;
 
 			const callPath = decoderRef.parentPath;
-			if (!callPath?.isCallExpression()) {
-				continue;
-			}
+			if (!callPath?.isCallExpression()) continue;
 
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			const args: any[] = [];
