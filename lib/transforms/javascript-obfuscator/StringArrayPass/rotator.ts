@@ -78,6 +78,20 @@ function evalRotatePredicate(node: t.Expression): number {
 	return Number.NaN;
 }
 
+function fixSimpleRotator(rotatorIifePath: NodePath<t.CallExpression>, decoderInfo: DecoderInfo): boolean {
+	const matches = bq.query(
+		rotatorIifePath, 'WhileStatement > UpdateExpression.test > Identifier'
+	);
+	if (matches.length === 0) return false;
+
+	const shiftArg = rotatorIifePath.get('arguments.1') as NodePath;
+	if (!shiftArg?.isNumericLiteral()) return false;
+	const shiftCount = shiftArg.node.value % decoderInfo.data.length;
+	decoderInfo.data.push(...decoderInfo.data.splice(0, shiftCount));
+
+	return true;
+}
+
 export default function analyseRotators(decoders: Map<Binding, DecoderInfo>) {
 	for (const decoderInfo of decoders.values()) {
 		const arrayBinding = decoderInfo.arrayBinding;
@@ -90,13 +104,19 @@ export default function analyseRotators(decoders: Map<Binding, DecoderInfo>) {
 		if (!rotatorIifePath?.isCallExpression()) continue;
 
 		const args = rotatorIifePath.get('arguments');
-		if (args.length !== 2) return;
-		if (!args[1].isNumericLiteral()) return;
+		if (args.length !== 2) continue;
+		if (!args[1].isNumericLiteral()) continue;
 
 		const expectedValueArg = args[1];
 		const state: {
 			rotatePredicate?: NodePath<t.Expression>;
-		} = {}
+		} = {};
+		if (fixSimpleRotator(rotatorIifePath, decoderInfo)) {
+			rotatorIifePath.remove();
+			dereferencePathFromBinding(arrayBinding, arrayArgRef);
+			continue;
+		}
+
 		rotatorIifePath.traverse({
 			VariableDeclarator(varPath) {
 				const init = varPath.get('init');

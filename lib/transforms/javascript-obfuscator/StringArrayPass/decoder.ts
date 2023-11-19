@@ -257,10 +257,17 @@ export default function findDecoders(
 				if (
 					!this.isBase64 ||
 					encryptExprPath.node.operator != '^' ||
-					!t.isMemberExpression(encryptExprPath.node.right) ||
-					!t.isBinaryExpression(encryptExprPath.node.right.property, {
-						operator: '%',
-					})
+					(!(
+						t.isMemberExpression(encryptExprPath.node.right) &&
+						t.isBinaryExpression(encryptExprPath.node.right.property, {
+							operator: '%',
+						})
+					) && !(
+						t.isMemberExpression(encryptExprPath.node.left) &&
+						t.isBinaryExpression(encryptExprPath.node.left.property, {
+							operator: '%',
+						})
+					))
 				) return;
 				this.curry = rc4Curry(this.curry);
 				encryptExprPath.stop();

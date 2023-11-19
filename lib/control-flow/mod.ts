@@ -1,24 +1,31 @@
-import { DirectedGraph } from 'graphology';
+import { MultiDirectedGraph } from 'graphology';
 import * as t from '@babel/types';
 
-type NormalizedBlock = {
+export type NormalizedBlock = {
 	beforeStatements: t.Statement[];
 	test: t.Expression | null;
 }
 
-type Block = NormalizedBlock & {
+export type Block = NormalizedBlock & {
 	afterStatements?: t.Statement[];
 };
 
-type Edge = {
+export type Edge = {
 	flowPredicate: boolean;
 };
 
-type CFGAttributes = {
+export type CFGAttributes = {
 	entry: t.Node;
 };
 
-export type ControlFlowGraph = DirectedGraph<Block, Edge, CFGAttributes>;
+export default class ControlFlowGraph extends MultiDirectedGraph<NormalizedBlock, Edge, CFGAttributes> {
+	constructor(graph: MultiDirectedGraph<Block, Edge, CFGAttributes>) {
+		super();
+		const original = graph.copy();
+		pushAfterStatements(original);
+		this.import(original.export());
+	}
+}
 
 function sortBranch(graph: ControlFlowGraph, parent: string, successors: string[]): [string, string] {
 	const [left, right] = successors;
@@ -33,7 +40,7 @@ function sortBranch(graph: ControlFlowGraph, parent: string, successors: string[
 	}
 }
 
-export function pushAfterStatements(graph: ControlFlowGraph) {
+export function pushAfterStatements(graph: MultiDirectedGraph<Block, Edge, CFGAttributes>) {
 	graph.forEachNode((node, block) => {
 		if (!block.afterStatements) return;
 		const { afterStatements } = block;

@@ -4,6 +4,8 @@ import { dereferencePathFromBinding, inlineProxyCall } from '../../utils.js';
 import LiteralFoldPass from '../LiteralFoldPass.js';
 import DeadCodeRemovalPass from './DeadCodeRemovalPass.js';
 
+export const repeatUntilStable = true;
+
 export default (path: NodePath): boolean => {
 	let changed = false;
 	const state = {
@@ -26,14 +28,13 @@ export default (path: NodePath): boolean => {
 				const id = path.get('id');
 				if (!id.isIdentifier()) return;
 
-				path.scope.crawl();
 				const binding = path.scope.getBinding(id.node.name);
 				if (!binding) return;
 
-				if (!binding.constant) {
+				if (binding.kind !== 'const' && !binding.constant) {
 					if (binding.constantViolations.length !== 1) return;
 					if (binding.constantViolations[0] != binding.path) return;
-					if (binding.kind != 'var') return;
+					if (binding.kind !== 'var') return;
 				}
 
 				if (binding.referencePaths.some(p => objExpPath.isAncestor(p))) return;

@@ -55,6 +55,10 @@ export function inlineProxyCall(
 	traverse(returnExp, {
 		noScope: true,
 		Identifier(path: NodePath<t.Identifier>) {
+			if (path.parentPath?.isMemberExpression() && path.key === 'property') {
+				return;
+			}
+
 			const name = argMap.get(path.node.name);
 			if (name) {
 				path.replaceWith(name);
