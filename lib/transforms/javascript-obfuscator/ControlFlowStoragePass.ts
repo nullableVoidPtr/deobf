@@ -178,8 +178,6 @@ export default (path: NodePath): boolean => {
 				DeadCodeRemovalPass(path.scope.path);
 				// ObjectFoldPass(path.scope.path);
 
-				path.scope.crawl();
-
 				const storage = {
 					binding,
 					propertyMap,
@@ -214,7 +212,6 @@ export default (path: NodePath): boolean => {
 				}
 
 				this.parentScopes.delete(path.scope);
-				path.scope.crawl();
 			},
 		},
 	}, state);

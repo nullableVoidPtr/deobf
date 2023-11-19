@@ -67,9 +67,6 @@ export default (path: NodePath): boolean => {
 
 			removed = true;
 		},
-		Scopable(path) {
-			path.scope.crawl();
-		}
 	});
 
 	return removed;
