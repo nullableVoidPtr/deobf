@@ -1,9 +1,8 @@
 import * as t from '@babel/types';
-import _traverse, { Binding, NodePath } from '@babel/traverse';
+import { Binding, NodePath } from '@babel/traverse';
 import { dereferencePathFromBinding, inlineProxyCall, Stack } from '../../../utils.js';
 import LiteralFoldPass from '../../LiteralFoldPass.js';
 import { DecoderInfo } from './decoder.js';
-
 
 function resolveVarWrapper(decoder: Binding, reference: NodePath): NodePath[] {
 	const binding = reference.scope.getOwnBinding(
@@ -85,11 +84,9 @@ function resolveFuncWrapper(decoder: Binding, reference: NodePath): NodePath[] {
 
 		const wrapperCall =
 			wrapperRef.parentPath as NodePath<t.CallExpression>;
-		const args = wrapperCall.node.arguments;
+		const args = wrapperCall.get('arguments');
 		if (
-			!args.every((a): a is t.Expression =>
-				t.isExpression(a)
-			)
+			!args.every((a): a is NodePath<t.Expression> => a.isExpression())
 		) {
 			throw new Error('unexpected call args');
 		}

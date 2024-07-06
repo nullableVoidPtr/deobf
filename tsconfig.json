@@ -102,6 +102,6 @@
   },
   "exclude": [
     "out",
-    "src/web-shim.js"
+    "src/web_shim.mjs"
   ]
 }

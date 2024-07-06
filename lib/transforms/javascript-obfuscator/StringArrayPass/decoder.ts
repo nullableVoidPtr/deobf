@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
 import * as bq from 'babylon-query';
-import _traverse, { Binding, NodePath } from '@babel/traverse';
+import { Binding, NodePath } from '@babel/traverse';
 import { decode as b64decode } from 'base64-arraybuffer';
 
 export interface DecoderInfo {

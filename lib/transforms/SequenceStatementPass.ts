@@ -1,54 +1,124 @@
 import * as t from '@babel/types';
 import { NodePath } from '@babel/traverse';
 
-const FIRST_CHECKS: Partial<Record<t.Node['type'], (ancestor: NodePath, current: NodePath) => boolean>> = {
-	AssignmentExpression: (parentPath: NodePath, path: NodePath) => (
-		path.key === 'right' &&
-		!(parentPath.get('left') as NodePath).isMemberExpression()
-	),
-	AssignmentPattern: (parentPath: NodePath, path: NodePath) => (
-		path.key === 'right' &&
-		!(parentPath.get('left') as NodePath).isMemberExpression()
-	),
-	UnaryExpression: (_: NodePath, path: NodePath) => (
+type CheckFunction<T extends t.Node> = (
+	ancestor: NodePath<T>,
+	current: NodePath<t.ParentMaps[T['type']]>,
+) => boolean;
+
+const FIRST_CHECKS = {
+	ArrayExpression: (_, path) => {
+		if (path.listKey === 'elements') {
+			return path.getAllPrevSiblings().every(p => p.isPure());
+		}
+
+		return false;
+	},
+	ObjectExpression: (_, path) => {
+		if (path.listKey === 'properties') {
+			return path.getAllPrevSiblings().every(p => p.isPure());
+		}
+
+		return false;
+	},
+	AssignmentExpression: (parentPath, path) => {
+		if (path.key === 'left') return true;
+
+		if (path.key === 'right') {
+			return parentPath.get('left').isPure();
+		}
+
+		return false;
+	},
+	UnaryExpression: (_, path) => (
 		path.key === 'argument'
 	),
-	BinaryExpression: (_: NodePath, path: NodePath) => (
-		path.key === 'left'
-	),
-	UpdateExpression: (_: NodePath, path: NodePath) => (
+	BinaryExpression: (parentPath, path) => {
+		if (path.key === 'left') return true;
+	
+		if (path.key === 'right') {
+			return parentPath.get('left').isPure();
+		}
+
+		return false;
+	},
+	UpdateExpression: (_, path) => (
 		path.key === 'argument'
 	),
-	ConditionalExpression: (_: NodePath, path: NodePath) => (
-		path.key === 'test'
-	),
-	MemberExpression: (_: NodePath, path: NodePath) => (
-		path.key === 'object'
-	),
-	OptionalMemberExpression: (_: NodePath, path: NodePath) => (
-		path.key === 'object'
-	),
-	CallExpression: (_: NodePath, path: NodePath) => (
-		path.key === 'callee'
-	),
-	OptionalCallExpression: (_: NodePath, path: NodePath) => (
-		path.key === 'callee'
-	),
-	NewExpression: (_: NodePath, path: NodePath) => (
-		path.key === 'callee'
-	),
-	ClassExpression: (_: NodePath, path: NodePath) => (
+	ConditionalExpression: (parentPath, path) => {
+		if (path.key === 'test') return true;
+		if (!parentPath.get('test').isPure()) return false;
+
+		if (path.key === 'consequent') return true;
+		if (!parentPath.get('consequent').isPure()) return false;
+
+		if (path.key === 'alternate') return true;
+		return false;
+	},
+	MemberExpression: (parentPath, path) => {
+		if (path.key === 'object') return true;
+		if (path.key === 'property') {
+			return parentPath.get('object').isPure();
+		}
+
+		return false;
+	},
+	OptionalMemberExpression: (parentPath, path) => {
+		if (path.key === 'object') return true;
+		if (path.key === 'property') {
+			return parentPath.get('object').isPure();
+		}
+
+		return false;
+	},
+	CallExpression: (_, path) => {
+		if (path.key === 'callee') return true;
+		if (path.listKey === 'arguments') {
+			return path.getAllPrevSiblings().every(p => p.isPure());
+		}
+
+		return false;
+	},
+	OptionalCallExpression: (_, path) => {
+		if (path.key === 'callee') return true;
+		if (path.listKey === 'arguments') {
+			return path.getAllPrevSiblings().every(p => p.isPure());
+		}
+
+		return false;
+	},
+	NewExpression: (_, path) => {
+		if (path.key === 'callee') return true;
+		if (path.listKey === 'arguments') {
+			return path.getAllPrevSiblings().every(p => p.isPure());
+		}
+
+		return false;
+	},
+	ClassExpression: (_, path) => (
 		path.key === 'superClass'
 	),
-	YieldExpression: (_: NodePath, path: NodePath) => (
+	YieldExpression: (_, path) => (
 		path.key === 'argument'
 	),
-	AwaitExpression: (_: NodePath, path: NodePath) => (
+	AwaitExpression: (_, path) => (
 		path.key === 'argument'
 	),
+} satisfies {
+	[Type in t.Expression['type']]?: CheckFunction<Extract<t.Node, { type: Type }>>;
+} as {
+	[Type in t.Expression['type']]?: (ancestor: NodePath, current: NodePath) => boolean;
 };
 
-const STATEMENTS: Partial<Record<t.Node['type'], NodePath['key']>> = {
+type ExtractExprs<T extends t.Node> = {
+	[K in keyof T as [t.Expression] extends [T[K]] ? K : [t.Expression[]] extends [T[K]] ? K : never]: K;
+};
+
+type OmitNever<T> = { [K in keyof T as T[K] extends never ? never : K]: T[K] }
+
+const STATEMENTS: {
+	[Type in t.Statement['type']]?: string;
+} = {
 	ExpressionStatement: 'expression',
 	ReturnStatement: 'argument',
 	ThrowStatement: 'argument',
@@ -61,7 +131,9 @@ const STATEMENTS: Partial<Record<t.Node['type'], NodePath['key']>> = {
 	WithStatement: 'object',
 	ClassDeclaration: 'superClass',
 	ExportDefaultDeclaration: 'declaration',
-}
+} satisfies Partial<OmitNever<{
+	[Type in t.Statement['type']]: keyof ExtractExprs<Extract<t.Node, { type: Type }>>;
+}>>;
 
 export const repeatUntilStable = true;
 
@@ -118,8 +190,8 @@ export default (path: NodePath): boolean => {
 			const isIndirectEval = lastExpression.isIdentifier({ name: 'eval' });
 
 			let current: NodePath = path;
-			let ancestor = parentPath;
-			while (!ancestor.isStatement()) {
+			let ancestor: NodePath = parentPath;
+			while (ancestor.isExpression()) {
 				if (!ancestor.parentPath) return;
 				if (!FIRST_CHECKS?.[ancestor.type]?.(ancestor, current)) return;
 
@@ -127,7 +199,11 @@ export default (path: NodePath): boolean => {
 				ancestor = ancestor.parentPath;
 			}
 
-			if (STATEMENTS?.[ancestor.type] === path.key) {
+			if (!ancestor.isStatement()) {
+				throw new Error();
+			}
+
+			if (STATEMENTS?.[ancestor.type] === current.key) {
 				ancestor.insertBefore(newStatements);
 				path.replaceWith(isIndirectEval
 					? t.sequenceExpression([

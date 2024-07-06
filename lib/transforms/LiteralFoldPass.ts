@@ -49,6 +49,7 @@ function isPureExpression(path: NodePath<t.Expression>): boolean {
 		case '+':
 		case '!':
 		case '~':
+		case 'void':
 		case 'typeof':
 			return isPureExpression(path.get('argument'));
 		default:

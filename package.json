@@ -1,40 +1,36 @@
 {
 	"name": "deobf",
 	"version": "0.0.1",
-	"description": "AST-level deobfuscation for JavaScript Obfuscator",
+	"description": "AST-level deobfuscation framework",
 	"type": "module",
 	"scripts": {
 		"lint": "eslint src/**/*.ts lib/**/*.ts bin/**/*.ts",
-		"build-web": "esbuild --bundle web/main.ts --format=esm --inject:src/web-shim.js --outfile=web/main.js"
+		"build-web": "esbuild --bundle --outdir=out/web web/index.html web/main.ts --loader:.html=copy --format=esm --inject:src/web_shim.mjs "
 	},
 	"author": "nullableVoidPtr",
 	"license": "GPL-3.0",
 	"dependencies": {
-		"@babel/generator": "^7.21.1",
-		"@babel/parser": "^7.21.5",
-		"@babel/traverse": "^7.18.9",
-		"@babel/types": "^7.21.5",
+		"@babel/generator": "^7.24.6",
+		"@babel/parser": "^7.24.6",
+		"@babel/traverse": "^7.24.6",
+		"@babel/types": "^7.24.6",
 		"babylon-query": "0.0.9",
 		"base64-arraybuffer": "^1.0.2",
-		"graphology": "^0.25.1",
-		"yargs": "^17.6.2"
-	},
-	"bin": {
-		"deobf-javascript-obfuscator": "./bin/javascript-obfuscator.js",
-		"deobf-jsdefender": "./bin/jsdefender.js",
-		"deobf-terser": "./bin/terser.js"
+		"graphology": "^0.25.4",
+		"yargs": "^17.7.2"
 	},
 	"devDependencies": {
-		"0x": "^5.4.1",
-		"@types/babel__generator": "^7.6.4",
-		"@types/babel__traverse": "^7.18.3",
-		"@types/node": "^18.11.18",
-		"@types/yargs": "^17.0.22",
-		"@typescript-eslint/eslint-plugin": "^5.54.1",
-		"@typescript-eslint/parser": "^5.54.1",
-		"esbuild": "^0.17.14",
-		"eslint": "^8.35.0",
+		"@eslint/eslintrc": "^3.1.0",
+		"@eslint/js": "^9.6.0",
+		"@types/babel__generator": "^7.6.8",
+		"@types/babel__traverse": "^7.20.6",
+		"@types/eslint__js": "^8.42.3",
+		"@types/node": "^20.14.2",
+		"@types/yargs": "^17.0.32",
+		"esbuild": "^0.21.4",
+		"eslint": "^9.4.0",
 		"graphology-types": "^0.24.7",
-		"typescript": "^4.9.5"
+		"typescript": "^5.4.5",
+		"typescript-eslint": "^7.15.0"
 	}
 }

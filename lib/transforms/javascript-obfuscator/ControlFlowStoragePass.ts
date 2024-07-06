@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
 import { Binding, NodePath, Scope } from '@babel/traverse';
-import { dereferencePathFromBinding, inlineProxyCall } from '../../utils.js';
+import { PropertyBinding, crawlProperties, inlineProxyCall } from '../../utils.js';
 import LiteralFoldPass from '../LiteralFoldPass.js';
 import DeadCodeRemovalPass from './DeadCodeRemovalPass.js';
 
@@ -12,7 +12,7 @@ export default (path: NodePath): boolean => {
 		parentScopes: new Map<Scope, {
 				binding: Binding;
 				propertyMap: Map<
-					string,
+					PropertyBinding,
 					NodePath<t.Expression | t.Function>
 				>;
 				mutated: boolean;
@@ -21,7 +21,7 @@ export default (path: NodePath): boolean => {
 
 	path.traverse({
 		VariableDeclarator: {
-			enter (path) {
+			enter(path) {
 				const objExpPath = path.get('init');
 				if (!objExpPath.isObjectExpression()) return;
 
@@ -31,92 +31,51 @@ export default (path: NodePath): boolean => {
 				const binding = path.scope.getBinding(id.node.name);
 				if (!binding) return;
 
-				if (binding.kind !== 'const' && !binding.constant) {
-					if (binding.constantViolations.length !== 1) return;
-					if (binding.constantViolations[0] != binding.path) return;
-					if (binding.kind !== 'var') return;
-				}
-
 				if (binding.referencePaths.some(p => objExpPath.isAncestor(p))) return;
 
-				const properties = objExpPath.get('properties');
-				if (properties.length === 0) return;
+				if (objExpPath.node.properties.length === 0) return;
+
+				const {
+					properties,
+					unresolvedBindings,
+					// unresolvedReferences,
+				} = crawlProperties(binding);
+
+				if (properties.size === 0) return;
+
+				if (unresolvedBindings.size > 0) return;
 
 				const propertyMap = new Map<
-					string,
+					PropertyBinding,
 					NodePath<t.Expression | t.Function>
 				>();
 
-				for (const property of properties) {
-					if (!property.isObjectMember()) return;
+				for (const property of properties.values()) {
+					if (!property.constant) return;
 
-					let key;
-					const keyPath = property.get('key');
-					if (keyPath.isStringLiteral()) {
-						key = keyPath.node.value;
-					} else if (keyPath.isIdentifier()) {
-						key = keyPath.node.name;
+					const { path } = property
+					if (path?.isObjectMethod()) {
+						propertyMap.set(property, path);
+					} else if (path?.isObjectProperty()) {
+						const valuePath = path.get('value');
+						if (valuePath.isExpression() || valuePath.isFunction()) {
+							propertyMap.set(property, valuePath);
+						}
 					} else {
 						return;
 					}
 
-					if (property.isObjectMethod()) {
-						propertyMap.set(key, property);
-					} else {
-						const valuePath = property.get('value') as NodePath;
-						if (!valuePath.isExpression()) return;
-						propertyMap.set(key, valuePath);
-					}
 				}
 
 				let mutated = false;
-				const unreplacedReferences = [];
-				for (const reference of [...binding.referencePaths].reverse()) {
-					const { parentPath } = reference;
-					if (!parentPath) continue;
-					if (parentPath.find(p => p.removed)) continue;
 
-					if (!parentPath?.isMemberExpression()) {
-						unreplacedReferences.push(reference);
-						continue;
-					}
-
-					const propertyPath = parentPath.get('property');
-					let key;
-					if (propertyPath.isStringLiteral()) {
-						key = propertyPath.node.value;
-					} else if (propertyPath.isIdentifier()) {
-						key = propertyPath.node.name;
-					}
-
-					if (!key) {
-						unreplacedReferences.push(reference);
-						continue;
-					}
-
-					const valuePath = propertyMap.get(key);
-					if (!valuePath) {
-						unreplacedReferences.push(reference);
-						continue;
-					}
-
-					if (!valuePath.isFunction()) {
-						parentPath.replaceWith(valuePath);
-					} else {
-						const callPath = parentPath.parentPath;
-						if (!callPath?.isCallExpression()) {
-							throw new Error('unexpected call expression');
-						}
-
-						const args = callPath.node.arguments;
-						if (
-							!args.every((a): a is t.Expression =>
-								t.isExpression(a)
-							)
-						) {
-							throw new Error('unexpected call args');
-						}
-
+				const nestedReferences: {
+					property: PropertyBinding;
+					reference: NodePath;
+					valuePath: NodePath<t.Function>;
+				}[] = [];
+				for (const [property, valuePath] of propertyMap.entries()) {
+					if (valuePath.isFunction()) {
 						// undo some overzealous deobfuscation
 						undo: {
 							const body = valuePath.get('body');
@@ -161,17 +120,89 @@ export default (path: NodePath): boolean => {
 								returnArg.replaceWith(t.logicalExpression('&&', predicate, returnArg.node));
 							}
 						}
-
-						try {
-							inlineProxyCall(callPath, valuePath, args);
-						} catch {
-							continue;
-						}
 					}
 
-					changed = true;
+					if (valuePath.isFunction()) {
+						for (const reference of property.referencePaths) {
+							const callPath = reference.parentPath;
+
+							const state = { containsRef: false };
+							callPath!.traverse({
+								MemberExpression(memberExpr) {
+									if (memberExpr === reference) {
+										path.skip();
+										return;
+									}
+
+									if (memberExpr.get('object').isIdentifier({ name: property.objectBinding.identifier.name })) {
+										this.containsRef = true;
+										path.stop();
+									}
+								}
+							}, state);
+
+							if (state.containsRef) {
+								nestedReferences.push({
+									property,
+									reference,
+									valuePath,
+								});
+								continue;
+							}
+
+							if (!callPath?.isCallExpression() || reference.key !== 'callee') {
+								throw new Error('unexpected call expression');
+							}
+
+							const args = callPath.get('arguments');
+							if (
+								!args.every((a): a is NodePath<t.Expression> => a.isExpression())
+							) {
+								throw new Error('unexpected call args');
+							}
+
+							inlineProxyCall(callPath, valuePath, args);
+
+							mutated = true;
+							property.dereference(reference);
+						}
+					} else {
+						for (const reference of property.referencePaths) {
+							reference.replaceWith(t.cloneNode(valuePath.node));
+
+							mutated = true;
+							property.dereference(reference);
+						}
+					}
+				}
+
+				nestedReferences.sort((a, b) =>
+					a.reference.getAncestry().length - b.reference.getAncestry().length
+				);
+
+				for (const {property, reference, valuePath} of nestedReferences) {
+					if (reference.find(p => p.removed)) continue;
+
+					const callPath = reference.parentPath;
+					if (!callPath?.isCallExpression() || reference.key !== 'callee') {
+						throw new Error('unexpected call expression');
+					}
+
+					const args = callPath.get('arguments');
+					if (
+						!args.every((a): a is NodePath<t.Expression> => a.isExpression())
+					) {
+						throw new Error('unexpected call args');
+					}
+
+					try {
+						inlineProxyCall(callPath, valuePath, args);
+					} catch {
+						continue;
+					}
+
 					mutated = true;
-					dereferencePathFromBinding(binding, reference);
+					property.dereference(reference);
 				}
 
 				LiteralFoldPass(path.scope.path);
@@ -198,11 +229,13 @@ export default (path: NodePath): boolean => {
 				if (!storages) return;
 
 				for (const { binding, propertyMap, mutated } of storages) {
+					changed ||= mutated;
+
 					if (!mutated) {
 						const { parentPath } = binding.path;
 						if (!parentPath?.isVariableDeclaration()) continue;
 						if (parentPath.node.kind !== 'const') continue;
-						if (![...propertyMap.keys()].every((k => k.match(/^\w{5}$/)))) continue;
+						if (![...propertyMap.keys()].every((k => k.key?.match(/^\w{5}$/)))) continue;
 					}
 
 					if (binding.referencePaths.filter(r => r.find(p => p.removed || !p.hasNode()) === null).length === 0) {
