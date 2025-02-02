@@ -1,5 +1,18 @@
 import * as t from '@babel/types';
-import { Binding, NodePath } from '@babel/traverse';
+import { type Binding, type NodePath } from '@babel/traverse';
+import { getVarInitId, pathAsBinding } from '../../../utils.js';
+
+function evalStringArrayChecked(path: NodePath<t.ArrayExpression>) {
+	const strings: string[] = [];
+	
+	for (const element of path.get('elements')) {
+		if (!element.isStringLiteral()) return null;
+
+		strings.push(element.node.value);
+	}
+
+	return strings;
+}
 
 function analyseStringArrayFunction(
 	funcDecl: NodePath<t.FunctionDeclaration>
@@ -31,14 +44,10 @@ function analyseStringArrayFunction(
 				return;
 			}
 
-			const elements = stringArrayPath.get('elements');
-			const mapResult = elements.map(
-				(elem: NodePath<t.SpreadElement | t.Expression | null>) =>
-					elem.isStringLiteral() ? elem.node.value : null
-			);
-			if (mapResult.every((e): e is string => e !== null)) {
+			const strings = evalStringArrayChecked(stringArrayPath);
+			if (strings) {
 				this.arrayIdentifier = idPath.node.name;
-				this.arrayData = mapResult;
+				this.arrayData = strings;
 			}
 
 			stringArrayPath.skip();
@@ -83,30 +92,20 @@ export default function findStringArrayCandidates(treePath: NodePath): Map<Bindi
 			}
 		},
 		ArrayExpression(arrayPath) {
-			const varPath = arrayPath.parentPath;
-			if (!varPath?.isVariableDeclarator()) {
+			const id = getVarInitId(arrayPath);
+			if (!id) {
 				arrayPath.skip();
 				return;
 			}
 
-			const idPath = varPath.get('id');
-			if (!idPath.isIdentifier()) {
-				arrayPath.skip();
-				return;
-			}
-
-			const binding = arrayPath.scope.getBinding(idPath.node.name);
+			const binding = pathAsBinding(id);
 			if (!binding) {
 				throw new Error('cannot get binding from scope');
 			}
 
-			const elements = arrayPath.get('elements');
-			const mapResult = elements.map(
-				(elem: NodePath<t.SpreadElement | t.Expression | null>) =>
-					elem.isStringLiteral() ? elem.node.value : null
-			);
-			if (mapResult.every((e): e is string => e !== null)) {
-				this.candidates.set(binding, mapResult);
+			const strings = evalStringArrayChecked(arrayPath);
+			if (strings) {
+				this.candidates.set(binding, strings);
 			}
 
 			arrayPath.skip();

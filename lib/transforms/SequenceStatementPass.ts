@@ -1,50 +1,64 @@
 import * as t from '@babel/types';
-import { NodePath } from '@babel/traverse';
+import { type NodePath } from '@babel/traverse';
 
 type CheckFunction<T extends t.Node> = (
 	ancestor: NodePath<T>,
 	current: NodePath<t.ParentMaps[T['type']]>,
 ) => boolean;
 
+function makeChildKeyCheck<T extends t.Node>(key: string): CheckFunction<T> {
+	return (_, path) => path.key === key;
+}
+
+function makeListContainerCheck<T extends t.Node>(listKey: string): CheckFunction<T> {
+	return (_, path) => {
+		if (path.listKey !== listKey) return false;
+
+		return path.getAllPrevSiblings().every(p => p.isPure());
+	}
+}
+
+function binExprCheck<T extends t.BinaryExpression | t.AssignmentExpression>(
+	parentPath: NodePath<T>,
+	path: NodePath<t.ParentMaps[T['type']]>
+) {
+	if (path.key === 'left') return true;
+
+	if (path.key === 'right') {
+		return (<typeof path>parentPath.get('left')).isPure();
+	}
+
+	return false;
+}
+
+function memberExprCheck<T extends t.MemberExpression | t.OptionalMemberExpression>(
+	parentPath: NodePath<T>,
+	path: NodePath<t.ParentMaps[T['type']]>
+) {
+	if (path.key === 'object') return true;
+	if (path.key === 'property') {
+		return (<typeof path>parentPath.get('object')).isPure();
+	}
+
+	return false;
+}
+
+function callLikeCheck(_: NodePath, path: NodePath) {
+	if (path.key === 'callee') return true;
+	if (path.listKey === 'arguments') {
+		return path.getAllPrevSiblings().every(p => p.isPure());
+	}
+
+	return false;
+}
+
 const FIRST_CHECKS = {
-	ArrayExpression: (_, path) => {
-		if (path.listKey === 'elements') {
-			return path.getAllPrevSiblings().every(p => p.isPure());
-		}
-
-		return false;
-	},
-	ObjectExpression: (_, path) => {
-		if (path.listKey === 'properties') {
-			return path.getAllPrevSiblings().every(p => p.isPure());
-		}
-
-		return false;
-	},
-	AssignmentExpression: (parentPath, path) => {
-		if (path.key === 'left') return true;
-
-		if (path.key === 'right') {
-			return parentPath.get('left').isPure();
-		}
-
-		return false;
-	},
-	UnaryExpression: (_, path) => (
-		path.key === 'argument'
-	),
-	BinaryExpression: (parentPath, path) => {
-		if (path.key === 'left') return true;
-	
-		if (path.key === 'right') {
-			return parentPath.get('left').isPure();
-		}
-
-		return false;
-	},
-	UpdateExpression: (_, path) => (
-		path.key === 'argument'
-	),
+	ArrayExpression: makeListContainerCheck('elements'),
+	ObjectExpression: makeListContainerCheck('properties'),
+	AssignmentExpression: binExprCheck,
+	UnaryExpression: makeChildKeyCheck('argument'),
+	BinaryExpression: binExprCheck,
+	UpdateExpression: makeChildKeyCheck('argument'),
 	ConditionalExpression: (parentPath, path) => {
 		if (path.key === 'test') return true;
 		if (!parentPath.get('test').isPure()) return false;
@@ -53,57 +67,17 @@ const FIRST_CHECKS = {
 		if (!parentPath.get('consequent').isPure()) return false;
 
 		if (path.key === 'alternate') return true;
-		return false;
-	},
-	MemberExpression: (parentPath, path) => {
-		if (path.key === 'object') return true;
-		if (path.key === 'property') {
-			return parentPath.get('object').isPure();
-		}
 
 		return false;
 	},
-	OptionalMemberExpression: (parentPath, path) => {
-		if (path.key === 'object') return true;
-		if (path.key === 'property') {
-			return parentPath.get('object').isPure();
-		}
-
-		return false;
-	},
-	CallExpression: (_, path) => {
-		if (path.key === 'callee') return true;
-		if (path.listKey === 'arguments') {
-			return path.getAllPrevSiblings().every(p => p.isPure());
-		}
-
-		return false;
-	},
-	OptionalCallExpression: (_, path) => {
-		if (path.key === 'callee') return true;
-		if (path.listKey === 'arguments') {
-			return path.getAllPrevSiblings().every(p => p.isPure());
-		}
-
-		return false;
-	},
-	NewExpression: (_, path) => {
-		if (path.key === 'callee') return true;
-		if (path.listKey === 'arguments') {
-			return path.getAllPrevSiblings().every(p => p.isPure());
-		}
-
-		return false;
-	},
-	ClassExpression: (_, path) => (
-		path.key === 'superClass'
-	),
-	YieldExpression: (_, path) => (
-		path.key === 'argument'
-	),
-	AwaitExpression: (_, path) => (
-		path.key === 'argument'
-	),
+	MemberExpression: memberExprCheck,
+	OptionalMemberExpression: memberExprCheck,
+	CallExpression: callLikeCheck,
+	OptionalCallExpression: callLikeCheck,
+	NewExpression: callLikeCheck,
+	ClassExpression: makeChildKeyCheck('superClass'),
+	YieldExpression: makeChildKeyCheck('argument'),
+	AwaitExpression: makeChildKeyCheck('argument'),
 } satisfies {
 	[Type in t.Expression['type']]?: CheckFunction<Extract<t.Node, { type: Type }>>;
 } as {
@@ -157,13 +131,19 @@ export default (path: NodePath): boolean => {
 				parentPath.key === 0 &&
 				path.key === 'init'
 			) {
-				parentPath.insertBefore(newStatements);
+				parentPath.parentPath.insertBefore(newStatements);
 				path.replaceWith(lastExpressionNode);
+				return;
 			} else if (
-				parentPath?.isForStatement() &&
-				path.key == 'update'
+				(
+					parentPath?.isForStatement() &&
+					path.key == 'update'
+				) || (
+					parentPath?.isDoWhileStatement() &&
+					path.key === 'test'
+				)
 			) {
-				const body = parentPath.get('body');
+				const body = (<NodePath<t.ForStatement | t.DoWhileStatement>>parentPath).get('body');
 				if (body.isBlockStatement()) {
 					body.node.body.push(...newStatements);
 				} else {
@@ -172,19 +152,7 @@ export default (path: NodePath): boolean => {
 					);
 				}
 				path.replaceWith(lastExpressionNode);
-			} else if (
-				parentPath?.isDoWhileStatement() &&
-				path.key === 'test'
-			) {
-				const body = parentPath.get('body');
-				if (body.isBlockStatement()) {
-					body.node.body.push(...newStatements);
-				} else {
-					body.replaceWith(
-						t.blockStatement([body.node, ...newStatements])
-					);
-				}
-				path.replaceWith(lastExpressionNode);
+				return;
 			}
 
 			const isIndirectEval = lastExpression.isIdentifier({ name: 'eval' });

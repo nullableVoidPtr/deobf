@@ -1,5 +1,5 @@
 import * as t from '@babel/types';
-import { NodePath } from '@babel/traverse';
+import { type NodePath } from '@babel/traverse';
 
 export const repeatUntilStable = true;
 
@@ -82,7 +82,14 @@ export default (path: NodePath): boolean => {
 			if (path.isArrayExpression()) return;
 			if (
 				path.isUnaryExpression() &&
+				['-', 'void'].includes(path.node.operator) &&
 				path.get('argument').isNumericLiteral()
+			)
+				return;
+			if (
+				path.isBinaryExpression({ operator: '/' }) &&
+				path.get('left').isNumericLiteral({ value: 1 }) && 
+				path.get('right').isNumericLiteral({ value: 0 })
 			)
 				return;
 

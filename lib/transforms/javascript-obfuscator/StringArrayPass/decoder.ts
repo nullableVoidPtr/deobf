@@ -1,7 +1,8 @@
 import * as t from '@babel/types';
 import * as bq from 'babylon-query';
-import { Binding, NodePath } from '@babel/traverse';
+import { type Binding, type NodePath } from '@babel/traverse';
 import { decode as b64decode } from 'base64-arraybuffer';
+import { getVarInitId, pathAsBinding } from '../../../utils.js';
 
 export interface DecoderInfo {
 	arrayBinding: Binding;
@@ -79,31 +80,23 @@ export default function findDecoders(
 			if (scope.path === binding.path) continue;
 
 			const func = scope.path;
-			let decoderId: NodePath<t.Identifier>;
+			if (!func.isFunction()) continue;
+			const params = func.get('params');
+			if (params.length !== 2) continue;
+			if (!params.every((p) => p.isIdentifier())) continue;
+
+			let decoderBinding: Binding | null = null;
 			if (func.isFunctionDeclaration()) {
-				const params = func.get('params');
-				if (params.length !== 2) continue;
-				if (!params.every((p) => p.isIdentifier())) continue;
-
-				const idPath = func.get('id');
-				if (!idPath.isIdentifier()) continue;
-				decoderId = idPath;
+				decoderBinding = pathAsBinding(func);
 			} else if (func.isFunctionExpression()) {
-				const params = func.get('params');
-				if (params.length !== 2) continue;
-				if (!params.every((p) => p.isIdentifier())) continue;
+				const varId = getVarInitId(func);
+				if (!varId) continue;
 
-				const varPath = func.parentPath;
-				if (!varPath.isVariableDeclarator()) continue;
-
-				const idPath = varPath.get('id');
-				if (!idPath.isIdentifier()) continue;
-				decoderId = idPath;
+				decoderBinding = pathAsBinding(varId);
 			} else {
 				continue;
 			}
 
-			const decoderBinding = scope.getBinding(decoderId.node.name);
 			if (!decoderBinding) {
 				throw new Error('cannot get binding from scope');
 			}

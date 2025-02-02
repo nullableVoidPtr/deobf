@@ -1,7 +1,7 @@
 import { parse } from '@babel/parser';
 import * as t from '@babel/types';
 import _traverse from '@babel/traverse';
-import { NodePath } from '@babel/traverse';
+import { type NodePath } from '@babel/traverse';
 import _generate from '@babel/generator';
 import { Target } from '../lib/targets/TargetComposer.js';
 

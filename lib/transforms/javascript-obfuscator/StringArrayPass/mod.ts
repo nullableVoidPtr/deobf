@@ -1,5 +1,5 @@
 import * as t from '@babel/types';
-import { Binding, NodePath } from '@babel/traverse';
+import { type Binding, type NodePath } from '@babel/traverse';
 import { dereferencePathFromBinding } from '../../../utils.js';
 import findStringArrayCandidates from './array.js';
 import findDecoders, { DecoderInfo } from './decoder.js';

@@ -1,9 +1,10 @@
 import * as t from '@babel/types';
-import { Binding, NodePath } from '@babel/traverse';
+import { type Binding, type NodePath } from '@babel/traverse';
 import { dereferencePathFromBinding, inlineProxyCall, Stack } from '../../../utils.js';
 import LiteralFoldPass from '../../LiteralFoldPass.js';
 import { DecoderInfo } from './decoder.js';
 
+// TODO(refactor): reference should be wrapper: Binding
 function resolveVarWrapper(decoder: Binding, reference: NodePath): NodePath[] {
 	const binding = reference.scope.getOwnBinding(
 		(<t.VariableDeclarator & { id: t.Identifier }>(
@@ -116,7 +117,9 @@ export default function resolveWrappers(decoders: Map<Binding, DecoderInfo>) {
 				continue;
 			}
 
-			callRefPathStack.push(...newRefs);
+			for (const ref of newRefs) {
+				callRefPathStack.push(ref);
+			}
 		}
 	}
 }

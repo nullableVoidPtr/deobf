@@ -1,5 +1,6 @@
 import * as t from '@babel/types';
-import { NodePath } from '@babel/traverse';
+import { type NodePath } from '@babel/traverse';
+import { pathAsBinding } from '../../utils.js';
 
 const reverseIdx = (arrNum: number, offset: number) => (indices: number[]): number => (indices.reduce((a, b) => {
 	let d = b - a * offset;
@@ -14,10 +15,7 @@ export default (path: NodePath): boolean => {
 
 	path.traverse({
 		VariableDeclarator(path) {
-			const id = path.get('id');
-			if (!id.isIdentifier()) return;
-
-			const binding = path.scope.getBinding(id.node.name);
+			const binding = pathAsBinding(path);
 			if (!binding) return;
 
 			const init = path.get('init');

@@ -1,5 +1,5 @@
 import * as t from '@babel/types';
-import { NodePath } from '@babel/traverse';
+import { type NodePath } from '@babel/traverse';
 import * as bq from 'babylon-query';
 
 const innerFuncSelector = bq.parse(

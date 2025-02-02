@@ -1,5 +1,19 @@
 import * as t from '@babel/types';
-import { NodePath } from '@babel/traverse';
+import { type NodePath } from '@babel/traverse';
+
+function fixupMember(path: NodePath<t.Method | t.Property>) {
+	const key = path.get('key');
+	if (!key.isStringLiteral()) return false;
+	if (!t.isValidIdentifier(key.node.value)) return false;
+
+	key.replaceWith(t.identifier(key.node.value));
+
+	if (path.node.type !== 'ClassPrivateProperty') {
+		path.node.computed = false;
+	}
+
+	return true;
+}
 
 export default (path: NodePath): boolean => {
 	let replaced = false;
@@ -15,25 +29,10 @@ export default (path: NodePath): boolean => {
 			path.node.computed = false;
 		},
 		Method(path) {
-			const key = path.get('key');
-			if (!key.isStringLiteral()) return;
-			if (!t.isValidIdentifier(key.node.value)) return;
-
-			replaced = true;
-			key.replaceWith(t.identifier(key.node.value));
-			path.node.computed = false;
+			replaced = fixupMember(path) || replaced;
 		},
 		Property(path) {
-			const key = path.get('key');
-			if (!key.isStringLiteral()) return;
-			if (!t.isValidIdentifier(key.node.value)) return;
-
-			replaced = true;
-			key.replaceWith(t.identifier(key.node.value));
-
-			if (path.node.type !== 'ClassPrivateProperty') {
-				path.node.computed = false;
-			}
+			replaced = fixupMember(path) || replaced;
 		},
 	});
 	return replaced;

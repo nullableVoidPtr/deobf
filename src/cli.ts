@@ -1,9 +1,9 @@
 import { parse } from '@babel/parser';
 import * as t from '@babel/types';
 import _traverse from '@babel/traverse';
-import { NodePath } from '@babel/traverse';
+import { type NodePath } from '@babel/traverse';
 import _generate from '@babel/generator';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import yargs from 'yargs';
 import { Target } from '../lib/targets/TargetComposer.js';
 

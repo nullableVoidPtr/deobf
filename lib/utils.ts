@@ -1,8 +1,45 @@
 import * as t from '@babel/types';
-import _traverse, { Binding, NodePath } from '@babel/traverse';
+import _traverse, { type Binding, type NodePath } from '@babel/traverse';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const traverse: typeof _traverse = (<any>_traverse).default;
+
+type HasIdentifierAsId<T extends t.Node> = T extends {id?: t.Node | null | undefined} ? T : never;
+
+export function getVarInitId(path: NodePath<t.Expression>): NodePath<t.Identifier> | null {
+	const varDeclPath = path.parentPath;
+	if (path.key !== 'init') return null;
+	if (!varDeclPath.isVariableDeclarator()) return null;
+	
+	const id = varDeclPath.get('id');
+	if (!id.isIdentifier()) return null;
+	
+	return id;
+}
+
+export function pathAsBinding(path: NodePath<t.Identifier | HasIdentifierAsId<t.Node>>): Binding | null {
+	let id: NodePath<t.Identifier>;
+	if (path.isIdentifier()) {
+		id = path;
+	} else {
+		const potentialId = path.get('id') as NodePath;
+		if (!potentialId.isIdentifier()) return null;
+
+		id = potentialId;
+	}
+
+	let binding = path.scope.getBinding(id.node.name);
+	if (!binding) return null;
+
+	if (path.isFunctionDeclaration()) {
+		if (binding.identifier === id.node) return binding;
+
+		binding = path.scope.parent.getBinding(id.node.name);
+		if (binding?.identifier !== id.node) return null;
+	}
+
+	return binding || null;
+}
 
 export function dereferencePathFromBinding(binding: Binding, reference: NodePath): boolean {
 	const refIndex = binding.referencePaths.indexOf(reference);
@@ -111,221 +148,4 @@ export class Stack<T> {
 		queue.push(...vs);
 		return queue;
 	}
-}
-
-export class PropertyBinding {
-	objectBinding: Binding;
-	key?: string;
-	isPrivate: boolean;
-	path?: NodePath;
-	valuePath?: NodePath;
-	referenceMap: Map<NodePath, NodePath> = new Map();
-	constantViolationMap: Map<NodePath, NodePath> = new Map();
-
-	constructor({
-		objectBinding,
-		property,
-		computed,
-		path,
-	}: {
-		objectBinding: Binding;
-		property: NodePath;
-		computed: boolean;
-		path?: NodePath;
-	}) {
-		this.path = path;
-		this.valuePath = path;
-		this.objectBinding = objectBinding;
-
-		this.isPrivate = property.isPrivateName();
-		this.key = PropertyBinding.resolveProperty(property, computed);
-	}
-
-	dereference(reference: NodePath) {
-		const directRef = this.referenceMap.get(reference);
-		if (!directRef) return;
-
-		dereferencePathFromBinding(this.objectBinding, directRef);
-	}
-
-	static resolveProperty(property: NodePath, computed: boolean): string | undefined {
-		if (property.isPrivateName()) {
-			return property.node.id.name;
-		}
-
-		if (property.isIdentifier()) {
-			if (computed) {
-				const resolved = property.resolve();
-				if (!resolved) return;
-
-				return PropertyBinding.resolveProperty(resolved, computed);
-			} else {
-				return property.node.name;
-			}
-		}
-
-		const state = property.evaluate();
-		if (state.confident) {
-			const { value } = state;
-			switch (typeof value) {
-			case 'string':
-				return value;
-			case 'bigint':
-			case 'number':
-				return value.toString();
-			case 'undefined':
-				return 'undefined';
-			case 'object':
-				if (value === null) {
-					return 'null';
-				}
-			}
-		}
-
-		return;
-	}
-
-	get scope() {
-		return this.objectBinding.scope;
-	}
-
-	get referencePaths(): Set<NodePath> {
-		return new Set(this.referenceMap.keys())
-	}
-
-	get references() {
-		return this.referenceMap.size;
-	}
-	
-	get referenced() {
-		return this.references > 0;
-	}
-	
-	get constantViolations(): Set<NodePath> {
-		return new Set(this.constantViolationMap.keys())
-	}
-
-	get constant() {
-		return this.constantViolationMap.size === 0;
-	}
-}
-
-export function crawlProperties(objectBinding: Binding): {
-	properties: Map<string, PropertyBinding>;
-	unresolvedBindings: Set<PropertyBinding>;
-	unresolvedReferences: Set<NodePath>;
-} {
-	const properties = new Map<string, PropertyBinding>();
-	const unresolvedBindings = new Set<PropertyBinding>();
-	const unresolvedReferences = new Set<NodePath>();
-
-	if (!objectBinding.constant) {
-		const isVarConst = objectBinding.kind === 'var' && objectBinding.constantViolations.length === 1 && objectBinding.constantViolations[0] == objectBinding.path;
-		if (!isVarConst) {
-			return {
-				properties,
-				unresolvedBindings,
-				unresolvedReferences,
-			};
-		}
-	}
-
-	const { path } = objectBinding;
-	if (path.isVariableDeclarator()) {
-		const objExpr = path.get('init');
-		if (objExpr.isObjectExpression()) {
-			for (const property of objExpr.get('properties')) {
-				let key: NodePath;
-				if (property.isObjectMethod()) {
-					key = property.get('key');
-				} else if (property.isObjectProperty()) {
-					key = property.get('key');
-				} else {
-					continue;
-				}
-
-				const binding = new PropertyBinding({
-					objectBinding,
-					property: key,
-					computed: property.is('computed'),
-					path: property,
-				});
-
-				if (binding.key) {
-					properties.set(binding.key, binding);
-				} else {
-					unresolvedBindings.add(binding);
-				}
-			}
-		}
-	}
-
-	for (const directRef of objectBinding.referencePaths) {
-		const memberExpr = directRef.parentPath;
-		if (!memberExpr?.isMemberExpression() || directRef.key != 'object') continue;
-
-		const property = memberExpr.get('property');
-		const computed = memberExpr.is('computed');
-		const key = PropertyBinding.resolveProperty(property, computed);
-
-		const reference = memberExpr.parentPath;
-		let isConstantViolation = false;
-		if (reference.isAssignmentExpression() && memberExpr.key == 'left') {
-			isConstantViolation = true;
-		} else if (reference.isUpdateExpression() && memberExpr.key == 'argument') {
-			isConstantViolation = true;
-		} else if (reference.isUnaryExpression({operator: 'delete'}) && memberExpr.key == 'argumment') {
-			isConstantViolation = true;
-		}
-
-		if (key) {
-			if (isConstantViolation) {
-				let binding = properties.get(key);
-				if (!binding) {
-					binding = new PropertyBinding({
-						objectBinding,
-						property,
-						computed,
-						path: reference,
-					});
-					properties.set(key, binding);
-					continue;
-				}
-
-				binding.constantViolationMap.set(reference, directRef)
-			} else {
-				let binding = properties.get(key);
-				if (!binding) {
-					binding = new PropertyBinding({
-						objectBinding,
-						property,
-						computed,
-					});
-					properties.set(key, binding);
-					continue;
-				}
-
-				binding.referenceMap.set(memberExpr, directRef);
-			}
-		} else {
-			if (isConstantViolation) {
-				const binding = new PropertyBinding({
-					objectBinding,
-					property,
-					computed,
-					path: reference,
-				});
-
-				unresolvedBindings.add(binding);
-			} else {
-				unresolvedReferences.add(memberExpr);
-			}
-		}
-	}
-
-	return {
-		properties,
-		unresolvedBindings,
-		unresolvedReferences,
-	};
 }

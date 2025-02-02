@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
-import { NodePath } from '@babel/traverse';
-import { dereferencePathFromBinding } from '../../utils.js';
+import { type NodePath } from '@babel/traverse';
+import { dereferencePathFromBinding, pathAsBinding } from '../../utils.js';
 
 
 export const repeatUntilStable = true;
@@ -15,10 +15,7 @@ export default (path: NodePath): boolean => {
 			const init = path.get('init');
 			if (!init.isObjectExpression()) return;
 
-			const id = path.get('id');
-			if (!id.isIdentifier()) return;
-
-			const binding = path.scope.getBinding(id.node.name);
+			const binding = pathAsBinding(path);
 			if (!binding) return;
 
 			const uncertainReferences: NodePath[] = [];

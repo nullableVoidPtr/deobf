@@ -1,4 +1,4 @@
-import { NodePath } from '@babel/traverse';
+import { type NodePath } from '@babel/traverse';
 
 type BasePass = {
 	default: (path: NodePath) => boolean;

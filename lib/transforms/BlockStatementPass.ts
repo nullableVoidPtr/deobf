@@ -1,5 +1,5 @@
 import * as t from '@babel/types';
-import { NodePath } from '@babel/traverse';
+import { type NodePath } from '@babel/traverse';
 
 export default (path: NodePath): boolean => {
 	const changed = false;

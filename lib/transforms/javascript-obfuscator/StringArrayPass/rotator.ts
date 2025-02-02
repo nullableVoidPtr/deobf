@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
 import * as bq from 'babylon-query';
-import _traverse, { Binding, NodePath } from '@babel/traverse';
+import _traverse, { type Binding, type NodePath } from '@babel/traverse';
 import { dereferencePathFromBinding } from '../../../utils.js';
 import { DecoderInfo } from './decoder.js';
 

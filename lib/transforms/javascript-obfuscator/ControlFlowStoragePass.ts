@@ -1,8 +1,9 @@
 import * as t from '@babel/types';
-import { Binding, NodePath, Scope } from '@babel/traverse';
-import { PropertyBinding, crawlProperties, inlineProxyCall } from '../../utils.js';
+import { type Binding, type NodePath, type Scope } from '@babel/traverse';
+import { inlineProxyCall, pathAsBinding } from '../../utils.js';
 import LiteralFoldPass from '../LiteralFoldPass.js';
 import DeadCodeRemovalPass from './DeadCodeRemovalPass.js';
+import { crawlProperties, PropertyBinding } from '../../ObjectBinding.js';
 
 export const repeatUntilStable = true;
 
@@ -25,10 +26,7 @@ export default (path: NodePath): boolean => {
 				const objExpPath = path.get('init');
 				if (!objExpPath.isObjectExpression()) return;
 
-				const id = path.get('id');
-				if (!id.isIdentifier()) return;
-
-				const binding = path.scope.getBinding(id.node.name);
+				const binding = pathAsBinding(path);
 				if (!binding) return;
 
 				if (binding.referencePaths.some(p => objExpPath.isAncestor(p))) return;
@@ -235,7 +233,7 @@ export default (path: NodePath): boolean => {
 						const { parentPath } = binding.path;
 						if (!parentPath?.isVariableDeclaration()) continue;
 						if (parentPath.node.kind !== 'const') continue;
-						if (![...propertyMap.keys()].every((k => k.key?.match(/^\w{5}$/)))) continue;
+						if (![...propertyMap.keys()].every((k => typeof k.key === 'string' && k.key.match(/^\w{5}$/)))) continue;
 					}
 
 					if (binding.referencePaths.filter(r => r.find(p => p.removed || !p.hasNode()) === null).length === 0) {

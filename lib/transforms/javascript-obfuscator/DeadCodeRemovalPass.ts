@@ -1,4 +1,4 @@
-import { NodePath } from '@babel/traverse';
+import { type NodePath } from '@babel/traverse';
 
 export default (path: NodePath): boolean => {
 	let removed = false;
@@ -9,47 +9,40 @@ export default (path: NodePath): boolean => {
 
 			const consequent = path.get('consequent');
 			const alternate = path.get('alternate');
+
+			let executed: typeof consequent;
+			let dead: typeof alternate;
 			if (test.node.value) {
-				if (consequent.isBlockStatement()) {
-					path.replaceWithMultiple(consequent.node.body);
-				} else {
-					path.replaceWith(consequent.node);
-				}
-
-				const { parentPath } = path;
-				if (parentPath.isBlockStatement()) {
-					const firstReturn = parentPath.get('body').find(s => s.isReturnStatement());
-					const after = firstReturn?.getAllNextSiblings();
-					if (after && after?.length > 0) {
-						for (const stmt of after) {
-							stmt.remove();
-						}
-					}
-				}
-
-				alternate.remove();
-			} else if (alternate.node != null){
-				if (alternate.isBlockStatement()) {
-					path.replaceWithMultiple(alternate.node.body);
-				} else {
-					path.replaceWith(alternate.node);
-				}
-
-				const { parentPath } = path;
-				if (parentPath.isBlockStatement()) {
-					const firstReturn = parentPath.get('body').find(s => s.isReturnStatement());
-					const after = firstReturn?.getAllNextSiblings();
-					if (after && after?.length > 0) {
-						for (const stmt of after) {
-							stmt.remove();
-						}
-					}
-				}
-
-				consequent.remove();
+				executed = consequent;
+				dead = alternate;
+			} else if (alternate.hasNode()) {
+				executed = alternate;
+				dead = consequent;
 			} else {
 				path.remove();
+				removed = true;
+
+				return;
 			}
+
+			if (executed.isBlockStatement()) {
+				path.replaceWithMultiple(executed.node.body);
+			} else {
+				path.replaceWith(executed.node);
+			}
+
+			const { parentPath } = path;
+			if (parentPath.isBlockStatement()) {
+				const firstReturn = parentPath.get('body').find(s => s.isReturnStatement());
+				const after = firstReturn?.getAllNextSiblings();
+				if (after && after?.length > 0) {
+					for (const stmt of after) {
+						stmt.remove();
+					}
+				}
+			}
+
+			dead.remove();
 
 			removed = true;
 		},
