@@ -11,8 +11,10 @@ export interface DecoderInfo {
 	decoder: (...args: any) => string;
 }
 
-const accessorCurry = (array: string[], offset: number) => (index: number | string) =>
-	array[Number(index) + offset];
+export type Indexer = (index: number | string) => number;
+
+const accessorCurry = (array: string[], indexer: Indexer) => (index: number | string) =>
+	array[indexer(index)];
 const b64DecCurry = (
 	accessor: ReturnType<typeof accessorCurry>,
 	alphabet: string
@@ -64,8 +66,63 @@ const rc4Curry =
 			return res;
 		};
 
+function offsetIndexer(decoder: NodePath<t.Function>): Indexer {
+	const firstArg = decoder.get('params.0');
+	if (!firstArg.isIdentifier()) {
+		throw new Error('unexpected non-Identifier as first parameter');
+	}
+	const indexParams = [decoder.scope.getOwnBinding(firstArg.node.name)];
+
+	let offset = 0;
+	for (const p of indexParams) {
+		if (!p) {
+			throw new Error('undefined index parameter');
+		}
+
+		if (p.constantViolations.length > 1) {
+			throw new Error('multiple constant violations');
+		}
+
+		const write = p.constantViolations[0];
+		if (write.isAssignmentExpression({ operator: '=' })) {
+			const valuePath = write.get('right');
+			if (!valuePath.isBinaryExpression({ operator: '-' })) {
+				throw new Error('unexpected constant violation value');
+			}
+
+			const sourcePath = valuePath.get('left');
+			if (!sourcePath.isIdentifier({ name: p.identifier.name })) {
+				throw new Error('unexpected constant violation value');
+			}
+
+			const shiftPath = valuePath.get('right');
+			if (!shiftPath.isNumericLiteral()) {
+				throw new Error('unexpected constant violation value');
+			}
+
+			offset = -shiftPath.node.value;
+		} else if (write.isAssignmentExpression({ operator: '-=' })) {
+			const shiftPath = write.get('right');
+			if (!shiftPath.isNumericLiteral()) {
+				throw new Error('unexpected constant violation value');
+			}
+
+			offset = -shiftPath.node.value;
+		} else {
+			throw new Error('unexpected constant violation');
+		}
+	}
+
+	return (index: number | string) => Number(index) + offset;
+}
+
+export type DecoderOptions = {
+	indexer?: typeof offsetIndexer;
+}
+
 export default function findDecoders(
-	arrayCandidates: Map<Binding, string[]>
+	arrayCandidates: Map<Binding, string[]>,
+	options?: DecoderOptions,
 ): Map<Binding, DecoderInfo> | null {
 	const potentialDecoders = new Map<
 		Binding,
@@ -149,64 +206,21 @@ export default function findDecoders(
 			throw new Error('decoder with no function');
 		}
 
-
-		const firstArg = decoderPath.get('params.0');
-		if (!firstArg.isIdentifier()) {
-			throw new Error('unexpected non-Identifier as first parameter');
-		}
-		const indexParams = [decoderPath.scope.getOwnBinding(firstArg.node.name)];
-		let shift = 0;
-		for (const p of indexParams) {
-			if (!p) {
-				throw new Error('undefined index parameter');
-			}
-
-			if (p.constantViolations.length > 1) {
-				throw new Error('multiple constant violations');
-			}
-
-			const write = p.constantViolations[0];
-			if (write.isAssignmentExpression({ operator: '=' })) {
-				const valuePath = write.get('right');
-				if (!valuePath.isBinaryExpression({ operator: '-' })) {
-					throw new Error('unexpected constant violation value');
-				}
-
-				const sourcePath = valuePath.get('left');
-				if (!sourcePath.isIdentifier({ name: p.identifier.name })) {
-					throw new Error('unexpected constant violation value');
-				}
-
-				const shiftPath = valuePath.get('right');
-				if (!shiftPath.isNumericLiteral()) {
-					throw new Error('unexpected constant violation value');
-				}
-
-				shift = -shiftPath.node.value;
-			} else if (write.isAssignmentExpression({ operator: '-=' })) {
-				const shiftPath = write.get('right');
-				if (!shiftPath.isNumericLiteral()) {
-					throw new Error('unexpected constant violation value');
-				}
-
-				shift = -shiftPath.node.value;
-			} else {
-				throw new Error('unexpected constant violation');
-			}
-		}
+		const indexerCreator = options?.indexer ?? offsetIndexer;
+		const indexer = indexerCreator(decoderPath);
 
 		const state = {
 			isBase64: false,
-			curry: accessorCurry(
+			currentDecoder: accessorCurry(
 				data,
-				shift
+				indexer
 			) as (index: number | string, key?: string) => string,
-		}
+		};
 		decoderPath.traverse({
 			CallExpression(atobPath: NodePath<t.CallExpression>) {
 				// Pre-1.3.0 polyfilled and called a globalThis variable
 				if (t.isIdentifier(atobPath.node.callee, { name: 'atob' })) {
-					this.curry = b64DecCurry(this.curry, defaultCharMap);
+					this.currentDecoder = b64DecCurry(this.currentDecoder, defaultCharMap);
 					this.isBase64 = true;
 					atobPath.skip();
 					return;
@@ -271,7 +285,7 @@ export default function findDecoders(
 							if (!assign.isAssignmentExpression({ operator: '=' }) || indexOfCall.key !== 'right') return;
 							if (!assign.get('left').isIdentifier({ name: bufferId.node.name })) return;
 						}
-						this.curry = b64DecCurry(this.curry, charMapPath.node.value);
+						this.currentDecoder = b64DecCurry(this.currentDecoder, charMapPath.node.value);
 						this.isBase64 = true;
 						charMapPath.stop();
 					},
@@ -299,11 +313,11 @@ export default function findDecoders(
 					return true;
 				}; 
 				if (!isSIndex(decryptExprPath.node.left) && !(isSIndex(decryptExprPath.node.right))) return;
-				this.curry = rc4Curry(this.curry);
+				this.currentDecoder = rc4Curry(this.currentDecoder);
 				decryptExprPath.stop();
 			},
 		}, state);
-		results.set(binding, { decoder: state.curry, data, arrayBinding });
+		results.set(binding, { decoder: state.currentDecoder, data, arrayBinding });
 	}
 
 	return results;

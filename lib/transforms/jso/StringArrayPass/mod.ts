@@ -2,9 +2,9 @@ import * as t from '@babel/types';
 import { type Binding, type NodePath } from '@babel/traverse';
 import { dereferencePathFromBinding, getParentingCall } from '../../../utils.js';
 import findStringArrayCandidates from './array.js';
-import findDecoders, { DecoderInfo } from './decoder.js';
+import findDecoders, { DecoderInfo, DecoderOptions } from './decoder.js';
 import resolveWrappers from './wrapper.js';
-import analyseRotators from './rotator.js';
+import analyseRotators, { RotatorAnalyser } from './rotator.js';
 import { fixCFStorage } from './storage.js';
 
 function removeDecoders(decoders: Map<Binding, DecoderInfo>) {
@@ -50,22 +50,33 @@ function replaceDecoderCalls(decoders: Map<Binding, DecoderInfo>) {
 	}
 }
 
-export default (treePath: NodePath): boolean => {
-	const candidates = findStringArrayCandidates(treePath);
-	if (candidates === null) {
-		return false;
-	}
+export function withOptions(options?: {
+	decoder?: DecoderOptions;
+	rotator?: RotatorAnalyser;
+}) {
+	return {
+		default: (path: NodePath): boolean => {
+			const candidates = findStringArrayCandidates(path);
+			if (candidates === null) {
+				return false;
+			}
 
-	const decoders = findDecoders(candidates);
-	if (decoders === null) {
-		return false;
-	}
+			const decoders = findDecoders(candidates, options?.decoder);
+			if (decoders === null) {
+				return false;
+			}
 
-	resolveWrappers(decoders);
-	analyseRotators(decoders);
+			resolveWrappers(decoders);
 
-	removeDecoders(decoders);
-	replaceDecoderCalls(decoders);
+			const rotatorAnalyser = options?.rotator ?? analyseRotators;
+			rotatorAnalyser(decoders);
 
-	return true;
-};
+			removeDecoders(decoders);
+			replaceDecoderCalls(decoders);
+
+			return true;
+		},
+	};
+}
+
+export default withOptions().default;
