@@ -4,5 +4,5 @@ import JavascriptObfuscatorTarget from '../lib/targets/JavascriptObfuscatorTarge
 
 cli(
 	JavascriptObfuscatorTarget,
-	'deobfuscate a file obfuscated by Javascript Obfuscator'
+	'deobfuscate a file'
 );

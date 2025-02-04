@@ -4,6 +4,25 @@ import _traverse, { type Binding, type NodePath } from '@babel/traverse';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const traverse: typeof _traverse = (<any>_traverse).default;
 
+export function asSingleStatement(path: NodePath<t.Node | null | undefined>) {
+	if (!path.isStatement()) return null;
+	if (!path.isBlockStatement()) return path;
+
+	const body = path.get('body');
+	const stmt = body.at(0);
+	if (stmt?.isReturnStatement()) {
+		return stmt;
+	} else if (stmt?.isContinueStatement()) {
+		return stmt;
+	} else if (stmt?.isBreakStatement()) {
+		return stmt;
+	} else if (body.length === 1) {
+		return stmt;
+	}
+
+	return null;
+}
+
 type HasIdentifierAsId<T extends t.Node> = T extends {id?: t.Node | null | undefined} ? T : never;
 
 export function getVarInitId(path: NodePath<t.Expression>): NodePath<t.Identifier> | null {
