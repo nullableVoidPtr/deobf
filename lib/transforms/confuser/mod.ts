@@ -2,7 +2,8 @@ export * as UnpackFunctionPass from './UnpackFunctionPass.js';
 export * as ASTDescramblePass from './ASTDescramblePass.js';
 export * as LiteralOutliningPass from './LiteralOutliningPass.js';
 export * as UnhoistPass from './UnhoistPass.js';
-// export * as UnflattenControlFlowPass from './UnflattenControlFlowPass.js'
+export * as UnflattenControlFlowPass from './UnflattenControlFlowPass/mod.js'
+export * as FixParametersPass from './FixParametersPass.js';
 export * as UnshuffleArrayPass from './UnshuffleArrayPass.js'
 export * as UnmaskVariablePass from './UnmaskVariablePass.js';
 export * as StringPass from './StringPass/mod.js';

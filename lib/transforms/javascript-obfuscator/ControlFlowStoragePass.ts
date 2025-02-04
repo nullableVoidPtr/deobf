@@ -175,7 +175,7 @@ export default (path: NodePath): boolean => {
 				}
 
 				nestedReferences.sort((a, b) =>
-					a.reference.getAncestry().length - b.reference.getAncestry().length
+					b.reference.getAncestry().length - a.reference.getAncestry().length
 				);
 
 				for (const {property, reference, valuePath} of nestedReferences) {

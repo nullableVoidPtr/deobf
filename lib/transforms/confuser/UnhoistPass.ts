@@ -1,5 +1,7 @@
 import * as t from '@babel/types';
 import { Binding, type NodePath } from '@babel/traverse';
+import { pathAsBinding } from '../../utils.js';
+import { extractHoistedDecl } from './utils.js';
 
 function getAssignedIdentifiers(pattern: NodePath<t.Pattern>): Set<string> {
 	const queue: NodePath[] = [pattern];
@@ -46,10 +48,66 @@ function getAssignedIdentifiers(pattern: NodePath<t.Pattern>): Set<string> {
 	return ids;
 }
 
+export function unhoistFunctionParams(func: NodePath<t.FunctionDeclaration | t.FunctionExpression>, funcLength: number) {
+	const extraParams = func.get('params').slice(funcLength);
+
+	const body = func.get('body').get('body');
+	for (const stmt of body) {
+		const hoist = extractHoistedDecl(stmt);
+		if (!hoist) return;
+
+		const { param, value } = hoist;
+		if (!extraParams.includes(param)) return;
+
+		if (stmt.isIfStatement() && value.isFunctionExpression()) {
+			stmt.replaceWith(t.functionDeclaration(
+				t.cloneNode(param.node, true),
+				value.node.params,
+				value.node.body,
+				value.node.generator,
+				value.node.async,
+			));
+		} else {
+			stmt.replaceWith(t.variableDeclaration(
+				'var',
+				[t.variableDeclarator(
+					t.cloneNode(param.node, true),
+					value.node,
+				)],
+			));
+		}
+
+		param.remove();
+	}
+}
+
 export default (path: NodePath): boolean => {
 	let changed = false;
 
 	path.traverse({
+		FunctionDeclaration(func) {
+			const params = func.get('params');
+			if (params.some(p => p.isRestElement())) return;
+
+			const binding = pathAsBinding(func);
+			if (!binding?.constant) return;
+
+			let maxArgLength = -1;
+			for (const ref of binding.referencePaths) {
+				const call = ref.parentPath;
+				if (!(call?.isCallExpression() || call?.isNewExpression()) || ref.key !== 'callee') return;
+
+				const args = (<NodePath<t.CallExpression | t.NewExpression>>call).get('arguments');
+				if (args.some(a => a.isSpreadElement())) return;
+				if (maxArgLength < args.length) {
+					maxArgLength = args.length;
+				}
+			}
+
+			if (maxArgLength === -1 || maxArgLength > params.length) return;
+
+			unhoistFunctionParams(func, maxArgLength);
+		},
 		VariableDeclaration(decn) {
 			if (decn.node.kind !== 'var') return;
 			for (const decl of decn.get('declarations')) {
@@ -63,9 +121,19 @@ export default (path: NodePath): boolean => {
 
 				const binding = decn.scope.getBinding(idPath.node.name);
 				if (!binding) continue;
-				if (binding.constantViolations.length !== 1) continue;
+				if (binding.constantViolations.length === 0) continue;
 
 				const assignment = binding.constantViolations[0];
+				if (binding.constantViolations.length !== 1) {
+					const stmt = assignment.parentPath;
+					if (!stmt?.isExpressionStatement()) continue;
+
+					const prior = stmt.getAllPrevSiblings();
+					if (!prior.some(p => p === decn)) continue;
+
+					if (prior.some(p => binding.referencePaths.some(p.isAncestor) || binding.constantViolations.some(p.isAncestor))) continue;
+				}
+
 				if (assignment.scope !== decn.scope) continue;
 				if (!assignment.isAssignmentExpression({ operator: '=' })) continue;
 

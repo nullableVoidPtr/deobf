@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
-import { pathAsBinding } from '../../utils.js';
+import { getPropertyName, pathAsBinding } from '../../utils.js';
 import { filterBody } from './utils.js';
 
 export default (path: NodePath): boolean => {
@@ -99,13 +99,8 @@ export default (path: NodePath): boolean => {
 
 			function analyseProperty(property: NodePath) {
 				if (property.isObjectMethod()) {
-					const keyPath = property.get('key');
-					let key;
-					if (keyPath.isIdentifier()) {
-						key = keyPath.node.name;
-					} else if (keyPath.isStringLiteral()) {
-						key = keyPath.node.value;
-					} else {
+					const key = getPropertyName(property);
+					if (key === null) {
 						return false;
 					}
 
@@ -196,13 +191,8 @@ export default (path: NodePath): boolean => {
 					continue;
 				}
 
-				const property = memberExpr.get('property');
-				let key;
-				if (property.isIdentifier()) {
-					key = property.node.name;
-				} else if (property.isStringLiteral()) {
-					key = property.node.value;
-				} else {
+				const key = getPropertyName(memberExpr);
+				if (key === null) {
 					missed = true;
 					continue;
 				}

@@ -29,8 +29,14 @@ export default class ControlFlowGraph extends MultiDirectedGraph<NormalizedBlock
 
 function sortBranch(graph: ControlFlowGraph, parent: string, successors: string[]): [string, string] {
 	const [left, right] = successors;
-	const leftFlow = graph.getDirectedEdgeAttribute(parent, left, 'flowPredicate');
-	const rightFlow = graph.getDirectedEdgeAttribute(parent, right, 'flowPredicate');
+	const leftEdges = graph.directedEdges(parent, left);
+	const rightEdges = graph.directedEdges(parent, right);
+
+	if (leftEdges.length !== 1) throw new TypeError();
+	if (rightEdges.length !== 1) throw new TypeError();
+
+	const leftFlow = graph.getEdgeAttribute(leftEdges[0], 'flowPredicate');
+	const rightFlow = graph.getEdgeAttribute(rightEdges[0], 'flowPredicate');
 	if (leftFlow && !rightFlow) {
 		return [right, left];
 	} else if (rightFlow && !leftFlow) {
@@ -76,6 +82,9 @@ function reduceSequence(graph: ControlFlowGraph) {
 		}
 
 		const [child] = successors;
+		if (parent === child) {
+			return acc;
+		}
 		if (graph.inNeighbors(child).length !== 1) {
 			return acc;
 		}
@@ -262,8 +271,13 @@ function reduceSimpleIf(graph: ControlFlowGraph) {
 		let ifTest: t.Expression;
 		let consequent: string;
 		let alternate: string | null;
-		let successor: string;
-		if (leftSuccessors[0] === right) {
+		let successor: string | null;
+
+		const leftConsequent = leftSuccessors[0] === right;
+		const rightConsequent = rightSuccessors[0] === left;
+		const ifElse = leftSuccessors[0] === rightSuccessors[0];
+
+		if (leftConsequent) {
 			if (graph.inNeighbors(left).length !== 1) {
 				return acc;
 			}
@@ -280,7 +294,7 @@ function reduceSimpleIf(graph: ControlFlowGraph) {
 			consequent = left;
 			alternate = null;
 			successor = right;
-		} else if (rightSuccessors[0] === left) {
+		} else if (rightConsequent) {
 			if (graph.inNeighbors(right).length !== 1) {
 				return acc;
 			}
@@ -297,11 +311,35 @@ function reduceSimpleIf(graph: ControlFlowGraph) {
 			consequent = right;
 			alternate = null;
 			successor = left;
-		} else if (leftSuccessors[0] === rightSuccessors[0]) {
+		} else if (leftSuccessors.length === 0 && rightSuccessors.length === 0) {
 			if (graph.inNeighbors(left).length !== 1) {
 				return acc;
 			}
 			if (graph.inNeighbors(right).length !== 1) {
+				return acc;
+			}
+
+			ifTest = test;
+			successor = null;
+
+			if (truthyBranch === left) {
+				consequent = left;
+				alternate  = right;
+			} else {
+				consequent = right;
+				alternate  = left;
+			}
+		} else if (ifElse) {
+			if (graph.inNeighbors(left).length !== 1) {
+				return acc;
+			}
+			if (graph.inNeighbors(right).length !== 1) {
+				return acc;
+			}
+			if (leftSuccessors.length !== 1) {
+				return acc;
+			}
+			if (rightSuccessors.length !== 1) {
 				return acc;
 			}
 
@@ -324,7 +362,7 @@ function reduceSimpleIf(graph: ControlFlowGraph) {
 			test: ifTest,
 			consequent,
 			alternate,
-			successor
+			successor,
 		});
 		return acc;
 	}, [] as {
@@ -332,7 +370,7 @@ function reduceSimpleIf(graph: ControlFlowGraph) {
 		test: t.Expression,
 		consequent: string,
 		alternate: string | null,
-		successor: string
+		successor: string | null
 	}[]);
 
 	if (ifList.length === 0) {
@@ -358,7 +396,9 @@ function reduceSimpleIf(graph: ControlFlowGraph) {
 			graph.dropNode(alternate);
 		}
 
-		graph.mergeEdge(header, successor, { flowPredicate: true });
+		if (successor !== null) {
+			graph.mergeEdge(header, successor, { flowPredicate: true });
+		}
 	}
 
 	return true;

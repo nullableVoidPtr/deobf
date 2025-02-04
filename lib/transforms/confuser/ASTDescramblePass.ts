@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
-import { asSingleStatement } from '../../utils.js';
+import { asSingleStatement, pathAsBinding } from '../../utils.js';
 
 export default (path: NodePath): boolean => {
 	let changed = false;
@@ -37,7 +37,7 @@ export default (path: NodePath): boolean => {
 				return;
 			}
 
-			const binding = func.scope.getBinding(idPath.node.name);
+			const binding = pathAsBinding(func);
 			if (!binding) return;
 
 			if (!binding.constant) {

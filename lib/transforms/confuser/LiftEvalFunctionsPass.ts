@@ -2,7 +2,7 @@ import * as t from '@babel/types';
 import { Binding, type NodePath } from '@babel/traverse';
 import { parse } from '@babel/parser';
 import _traverse from '@babel/traverse';
-import { asSingleStatement, pathAsBinding } from '../../utils.js';
+import { asSingleStatement, getPropertyName, pathAsBinding } from '../../utils.js';
 import * as DeadCodeRemovalPass from './DeadCodeRemovalPass.js';
 import * as BlockStatementPass from '../BlockStatementPass.js';
 import TargetComposer from '../../targets/TargetComposer.js';
@@ -18,7 +18,9 @@ import * as GlobalObjectPass from './GlobalObjectPass.js';
 import * as CalculatorInlinePass from './CalculatorInlinePass.js';
 import * as DummyFunctionPass from './DummyFunctionPass.js';
 import * as UnhoistPass from './UnhoistPass.js';
+import * as UnflattenControlFlowPass from './UnflattenControlFlowPass/mod.js';
 import { filterBody } from './utils.js';
+import * as FixParametersPass from './FixParametersPass.js';
 
 // eslint-disable-next-line  @typescript-eslint/no-explicit-any
 const traverse: typeof _traverse = (_traverse as any).default;
@@ -28,12 +30,18 @@ const innerTarget = TargetComposer([
 	ASTDescramblePass,
 	[ConditionalStatementPass],
 	UnhoistPass,
+	UnflattenControlFlowPass,
+	LiteralFoldPass,
+	FixParametersPass,
 	UnshuffleArrayPass,
 	LiteralFoldPass,
 	LiteralOutliningPass,
 	LiteralFoldPass,
 	DotNotationPass,
+	FixParametersPass,
 	UnmaskVariablePass,
+	DummyFunctionPass,
+	DeadCodeRemovalPass,
 	StringPass,
 	LiteralFoldPass,
 	DotNotationPass,
@@ -41,6 +49,7 @@ const innerTarget = TargetComposer([
 	CalculatorInlinePass,
 	DummyFunctionPass,
 	LiteralFoldPass,
+	DotNotationPass,
 	DeadCodeRemovalPass,
 ]);
 
@@ -60,57 +69,59 @@ function liftRuntimeFunc(body: NodePath<t.Statement>[]): t.FunctionExpression | 
 	);
 
 	const funcBody = filterBody(func.get('body').get('body'));
-	const argsDecn = funcBody.at(0);
-	if (!argsDecn?.isVariableDeclaration()) return liftedFunc;
+	if (func.node.params.length === 0) {
+		const argsDecn = funcBody.at(0);
+		if (!argsDecn?.isVariableDeclaration()) return liftedFunc;
 
-	const decls = argsDecn.get('declarations');
-	if (decls.length !== 1) return liftedFunc;
+		const decls = argsDecn.get('declarations');
+		if (decls.length !== 1) return liftedFunc;
 
-	const [argsDecl] = decls;
-	if (!argsDecl.get('init').isIdentifier({ name: 'arguments'})) return liftedFunc;
-	const trueParams = argsDecl.get('id');
-	if (!trueParams.isArrayPattern()) return liftedFunc;
+		const [argsDecl] = decls;
+		if (!argsDecl.get('init').isIdentifier({ name: 'arguments'})) return liftedFunc;
+		const trueParams = argsDecl.get('id');
+		if (!trueParams.isArrayPattern()) return liftedFunc;
 
 
-	const newParams = [];
-	for (const param of trueParams.get('elements')) {
-		if (!param.hasNode()) return liftedFunc;
-		if (!param.isPattern() && !param.isIdentifier() && !param.isRestElement()) return liftedFunc;
-		newParams.push(param.node);
+		const newParams = [];
+		for (const param of trueParams.get('elements')) {
+			if (!param.hasNode()) return liftedFunc;
+			if (!param.isPattern() && !param.isIdentifier() && !param.isRestElement()) return liftedFunc;
+			newParams.push(param.node);
+		}
+
+		argsDecn.remove();
+		func.node.params = newParams;
+
+		func.scope.crawl();
+
+		liftedFunc = t.functionExpression(
+			id,
+			func.node.params,
+			func.node.body,
+			func.node.generator,
+			func.node.async,
+		)
 	}
 
-	argsDecn.remove();
-	func.node.params = newParams;
+	if (liftedFunc.params.length !== 2) return liftedFunc;
+	if (liftedFunc.body.body.length !== 2) return liftedFunc;
 
-	func.scope.crawl();
-
-	liftedFunc = t.functionExpression(
-		id,
-		func.node.params,
-		func.node.body,
-		func.node.generator,
-		func.node.async,
-	)
-
-	if (newParams.length !== 2) return liftedFunc;
-	if (funcBody.length !== 3) return liftedFunc;
-
-	const innerFunc = funcBody[1];
-	if (!innerFunc.isFunctionDeclaration()) return liftedFunc;
+	const innerFunc = funcBody.at(-2);
+	if (!innerFunc?.isFunctionDeclaration()) return liftedFunc;
 	const innerFuncId = innerFunc.node.id;
 	if (!innerFuncId) return liftedFunc;
 
-	const ret = funcBody[2];
-	if (!ret.isReturnStatement()) return liftedFunc;
+	const ret = funcBody.at(-1);
+	if (!ret?.isReturnStatement()) return liftedFunc;
 	const innerCall = ret.get('argument');
 	if (!innerCall.isCallExpression() || !innerCall.get('callee').matchesPattern(`${innerFuncId.name}.apply`)) return liftedFunc;
 	const innerCallArgs = innerCall.get('arguments');
 	if (innerCallArgs.length !== 2) return liftedFunc;
 
 	if (!innerCallArgs[0].isThisExpression()) return liftedFunc;
-	if (!t.isIdentifier(newParams[1]) || !innerCallArgs[1].isIdentifier({ name: newParams[1].name })) return liftedFunc;
+	if (!t.isIdentifier(liftedFunc.params[1]) || !innerCallArgs[1].isIdentifier({ name: liftedFunc.params[1].name })) return liftedFunc;
 
-	let funcArrayParam = newParams[0];
+	let funcArrayParam = liftedFunc.params[0];
 	if (t.isIdentifier(funcArrayParam) && innerFunc.scope.hasBinding(funcArrayParam.name)) {
 		const newName = innerFunc.scope.generateUid(funcArrayParam.name);
 		func.scope.rename(funcArrayParam.name, newName);
@@ -305,7 +316,7 @@ export default (path: NodePath): boolean => {
 
 			const apply = memberExpr.parentPath;
 			if (!apply?.isMemberExpression() || memberExpr.key !== 'object') continue;
-			if (!apply.get('property').isIdentifier({ name: 'apply' })) continue;
+			if (getPropertyName(apply) !== 'apply') continue;
 
 			const call = apply.parentPath;
 			if (!call.isCallExpression() || apply.key !== 'callee') continue;
@@ -337,7 +348,7 @@ export default (path: NodePath): boolean => {
 			actualFunc.node.params = newParams;
 			block.replaceWith(t.cloneNode(innerFunc.node.body, true));
 
-			const funcArrayBinding = arrayRef.scope.getBinding(arrayRef.node.name);
+			const funcArrayBinding = pathAsBinding(arrayRef);
 			if (funcArrayBinding?.constant) {
 				for (const arrayRef of funcArrayBinding.referencePaths) {
 					arrayRef.replaceWith(t.identifier(arrayBinding.identifier.name));

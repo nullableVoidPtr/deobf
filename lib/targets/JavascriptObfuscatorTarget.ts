@@ -9,7 +9,7 @@ import * as DotNotationPass from '../transforms/DotNotationPass.js';
 export default TargetComposer([
 	BlockStatementPass,
 	[SequenceStatementPass, ConditionalStatementPass],
-	JSOP.ControlFlowStoragePass,
+	// JSOP.ControlFlowStoragePass,
 	LiteralFoldPass,
 	JSOP.StringArrayPass,
 	LiteralFoldPass,

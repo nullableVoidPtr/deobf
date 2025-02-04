@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
 import { type Binding, type NodePath } from '@babel/traverse';
-import { pathAsBinding } from '../../utils.js';
+import { getPropertyName, pathAsBinding } from '../../utils.js';
 
 export default (path: NodePath): boolean => {
 	let changed = false;
@@ -27,10 +27,10 @@ export default (path: NodePath): boolean => {
 
 			if (!arrayParam.referencePaths.some(ref => ref.parentPath?.isReturnStatement())) return;
 			if (!arrayParam.referencePaths.some(
-				ref => ref.parentPath?.isMemberExpression() && ref.key === 'object' && ref.parentPath.get('property').isIdentifier({ name: 'push' })
+				ref => ref.parentPath?.isMemberExpression() && ref.key === 'object' && getPropertyName(ref.parentPath) === 'push'
 			)) return;
 			if (!arrayParam.referencePaths.some(
-				ref => ref.parentPath?.isMemberExpression() && ref.key === 'object' && ref.parentPath.get('property').isIdentifier({ name: 'shift' })
+				ref => ref.parentPath?.isMemberExpression() && ref.key === 'object' && getPropertyName(ref.parentPath) === 'shift'
 			)) return;
 
 			if (!offsetParam.referencePaths.some(ref => ref.parentPath?.isBinaryExpression() && (

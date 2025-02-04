@@ -1,16 +1,33 @@
 import * as t from '@babel/types';
 import { type Binding, type NodePath } from '@babel/traverse';
-import { asSingleStatement, pathAsBinding } from '../../utils.js';
+import { asSingleStatement, getPropertyName, pathAsBinding } from '../../utils.js';
 import { filterBody } from './utils.js';
+import { unhoistFunctionParams } from './UnhoistPass.js';
 
 function fixDispatchedFunction(func: NodePath<t.FunctionExpression>, newFuncName: string, argsArrayName: string) {
-	if (func.node.params.length !== 0) return null;
+	if (func.node.params.length !== 0) {
+		unhoistFunctionParams(func, 0);
 
-	const body = func.get('body').get('body');
+		const newVars: string[] = [];
+		for (const param of func.node.params) {
+			if (param.type !== 'Identifier') return null;
+			newVars.push(param.name);
+		}
+
+		if (newVars.length > 0) {
+			func.get('body').get('body')[0].insertBefore(t.variableDeclaration(
+				'var',
+				newVars.map(id => t.variableDeclarator(t.identifier(id))),
+			));
+		}
+	}
+
+	const body = filterBody(func.get('body').get('body'));
 	let argsDecn: NodePath | null = null
 	let argsPattern: NodePath | null = null;
 	for (const stmt of body) {
-		if (!stmt?.isVariableDeclaration()) return null;
+		if (stmt?.isFunctionDeclaration()) continue;
+		if (!stmt?.isVariableDeclaration()) break;
 		if (stmt.node.declarations.length !== 1) continue;
 
 		const argsDecl = stmt.get('declarations')[0];
@@ -21,28 +38,24 @@ function fixDispatchedFunction(func: NodePath<t.FunctionExpression>, newFuncName
 		break;
 	}
 	
-	if (!argsPattern) return null;
-
-	if (argsPattern.isArrayPattern()) {
-		const newParams = [];
+	const newParams = [];
+	if (argsPattern?.isArrayPattern()) {
 		for (const param of argsPattern.get('elements')) {
 			if (!param.hasNode()) return null;
 			if (!param.isPattern() && !param.isIdentifier() && !param.isRestElement()) return null;
 			newParams.push(param.node);
 		}
-
-		return t.functionDeclaration(
-			t.identifier(newFuncName),
-			newParams,
-			t.blockStatement(
-				body.filter(stmt => stmt !== argsDecn).map(p => p.node),
-			),
-			func.node.generator,
-			func.node.async,
-		);
 	}
 
-	return null;
+	return t.functionDeclaration(
+		t.identifier(newFuncName),
+		newParams,
+		t.blockStatement(
+			body.filter(stmt => stmt !== argsDecn).map(p => p.node),
+		),
+		func.node.generator,
+		func.node.async,
+	);
 }
 
 export default (path: NodePath): boolean => {
@@ -56,15 +69,8 @@ export default (path: NodePath): boolean => {
 				const func = property.get('value');
 				if (!func.isFunctionExpression()) return;
 
-				const keyPath = property.get('key');
-				let key;
-				if (keyPath.isIdentifier()) {
-					key = keyPath.node.name;
-				} else if (keyPath.isStringLiteral()) {
-					key = keyPath.node.value.toString();
-				} else {
-					return;
-				}
+				const key = getPropertyName(property);
+				if (key === null) return;
 
 				funcs.set(key, func);
 			}
@@ -106,15 +112,8 @@ export default (path: NodePath): boolean => {
 				const length = property.get('value');
 				if (!length.isNumericLiteral()) return;
 
-				const keyPath = property.get('key');
-				let key;
-				if (keyPath.isIdentifier()) {
-					key = keyPath.node.name;
-				} else if (keyPath.isStringLiteral()) {
-					key = keyPath.node.value.toString();
-				} else {
-					return;
-				}
+				const key = getPropertyName(property);
+				if (key === null) return;
 
 				funcLengths.set(key, length.node.value);
 			}
@@ -203,10 +202,9 @@ export default (path: NodePath): boolean => {
 			const objReturnObj = objReturn.get('argument');
 			if (!objReturnObj.isObjectExpression() || objReturnObj.node.properties.length !== 1) return;
 			const objReturnProp = objReturnObj.get('properties')[0];
-			if (!objReturnProp.isObjectProperty() || objReturnProp.node.computed) return;
-			const objReturnKeyPath = objReturnProp.get('key');
-			if (!objReturnKeyPath.isIdentifier()) return;
-			const objReturnKey = objReturnKeyPath.node.name;
+			if (!objReturnProp.isObjectProperty()) return;
+			const objReturnKey = getPropertyName(objReturnProp);
+			if (objReturnKey === null) return;
 
 			let alternate: NodePath<t.Node | null | undefined> = objReturnIfStmt.get('alternate');
 			if (!alternate.hasNode()) {
@@ -273,7 +271,7 @@ export default (path: NodePath): boolean => {
 				if (objReturn) {
 					wrapped = true;
 					const memberExpr = call.parentPath;
-					if (memberExpr.isMemberExpression({ computed: false }) && memberExpr.get('property').isIdentifier({ name: objReturnKey })) {
+					if (getPropertyName(memberExpr) === objReturnKey) {
 						ancestor = memberExpr;
 						wrapped = false;
 					}
@@ -285,14 +283,26 @@ export default (path: NodePath): boolean => {
 				} else {
 					const args: (t.Expression | t.SpreadElement)[] = [];
 					if (!clearArg) {
+						let argAssign: NodePath<t.Expression>;
+
+						const toRemove: NodePath[] = [];
 						const sequence = ancestor.parentPath;
-						if (!sequence?.isSequenceExpression()) {
+						if (sequence?.isExpressionStatement()) {
+							const prev = sequence.getPrevSibling();
+							if (!prev.isExpressionStatement()) {
+								missed = true;
+								continue;
+							}
+							
+							toRemove.push(prev);
+							argAssign = prev.get('expression');
+						} else if (sequence?.isSequenceExpression()) {
+							argAssign = ancestor.getPrevSibling() as NodePath<t.Expression>;
+							ancestor = sequence;
+						} else {
 							missed = true;
 							continue;
 						}
-
-						const argAssign = ancestor.getPrevSibling();
-						ancestor = sequence;
 
 						if (!argAssign.isAssignmentExpression({ operator: '=' }) || !argAssign.get('left').isIdentifier({ name: argArrayBinding.identifier.name })) {
 							missed = true;
@@ -312,6 +322,9 @@ export default (path: NodePath): boolean => {
 						}
 
 						args.push(...<(t.Expression | t.SpreadElement)[]>elements.map(e => e.node));
+						for (const node of toRemove) {
+							node.remove();
+						}
 					}
 
 					result = t.callExpression(

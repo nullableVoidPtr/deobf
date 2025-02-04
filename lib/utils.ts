@@ -4,6 +4,15 @@ import _traverse, { type Binding, type NodePath } from '@babel/traverse';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const traverse: typeof _traverse = (<any>_traverse).default;
 
+export function isUndefined(path: NodePath<t.Node | null | undefined>) {
+	if (path.isIdentifier({ name: 'undefined' })) return true;
+	if (path.isUnaryExpression({ operator: 'void', prefix: true })) {
+		return path.get('argument').isLiteral();
+	}
+
+	return false;
+}
+
 export function asSingleStatement(path: NodePath<t.Node | null | undefined>) {
 	if (!path.isStatement()) return null;
 	if (!path.isBlockStatement()) return path;
@@ -70,6 +79,34 @@ export function dereferencePathFromBinding(binding: Binding, reference: NodePath
 
 	return false;
 }
+
+export function getPropertyName(path: NodePath) {
+	if (path.isObjectMember()) {
+		const property = path.get('key');
+		if (property.isIdentifier() && !path.node.computed) {
+			return property.node.name;
+		} else if (property.isStringLiteral()) {
+			return property.node.value;
+		}
+	} else if (path.isMemberExpression() || path.isOptionalMemberExpression()) {
+		const property = (<NodePath<t.MemberExpression | t.OptionalMemberExpression>>path).get('property');
+		if (property.isIdentifier() && !path.node.computed) {
+			return property.node.name;
+		} else if (property.isStringLiteral()) {
+			return property.node.value;
+		}
+	}
+
+	return null;
+}
+
+export function isRemoved(path: NodePath): boolean {
+	return path.find(
+		ancestor => ancestor.removed || !ancestor.hasNode()
+	) !== null;
+}
+
+
 
 export function inlineProxyCall(
 	callExpr: NodePath<t.CallExpression>,

@@ -1,7 +1,7 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
 import * as bq from 'babylon-query';
-import { dereferencePathFromBinding } from '../../utils.js';
+import { dereferencePathFromBinding, pathAsBinding } from '../../utils.js';
 
 const dispatcherSelector = bq.parse(
 	`WhileStatement:has(
@@ -32,9 +32,7 @@ export default (path: NodePath): boolean => {
 		)
 	);
 	for (const match of execOrderMatches) {
-		const orderBinding = match.scope.getBinding(
-			(<t.Identifier>match.node.id).name
-		);
+		const orderBinding = pathAsBinding(match);
 		if (!orderBinding) {
 			throw new Error('cannot get binding for control flow');
 		}

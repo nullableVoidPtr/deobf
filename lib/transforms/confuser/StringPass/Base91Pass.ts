@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
 import { type Binding, type NodePath } from '@babel/traverse';
-import { pathAsBinding } from '../../../utils.js';
+import { dereferencePathFromBinding, getPropertyName, isRemoved, pathAsBinding } from '../../../utils.js';
 
 function makeBase91Decoder(alphabet: string) {
 	// Reference: https://github.com/aberaud/base91-python/blob/master/base91.py#L42
@@ -79,21 +79,18 @@ function findDecoders(path: NodePath) {
 		};
 		candidate.traverse({
 			VariableDeclarator(decl) {
-				const idPath = decl.get('id');
-				if (!idPath.isIdentifier()) return;
-
 				const init = decl.get('init');
 
 				if (!init.isStringLiteral()) return;
 				if (init.node.value.length < 91) return;
 
-				const binding = decl.scope.getBinding(idPath.node.name);
+				const binding = pathAsBinding(decl);
 				if (!binding) return;
 
 				for (const ref of binding.referencePaths) {
 					const memberExpr = ref.parentPath;
 					if (!memberExpr?.isMemberExpression() || ref.key !== 'object') continue;
-					if (!memberExpr.get('property').isIdentifier({ name: 'indexOf' })) continue;
+					if (getPropertyName(memberExpr) !== 'indexOf') continue;
 
 					const call = memberExpr.parentPath;
 					if (!call.isCallExpression() || memberExpr.key !== 'callee') continue;
@@ -109,7 +106,7 @@ function findDecoders(path: NodePath) {
 				const callee = argument.get('callee');
 				if (!callee.isIdentifier()) return;
 
-				const binding = callee.scope.getBinding(callee.node.name);
+				const binding = pathAsBinding(callee);
 				if (!binding) return;
 
 				if (this.codepointDecoder) return;
@@ -177,8 +174,8 @@ export default (path: NodePath): boolean => {
 		const stringArrays = new Map<Binding, string[]>();
 		
 		let missedDecoderRef = false;
-		for (const ref of binding.referencePaths) {
-			if (ref.getAncestry().some(ancestor => ancestor.removed)) continue;
+		for (const ref of [...binding.referencePaths]) {
+			if (isRemoved(ref)) continue;
 
 			const {parentPath} = ref;
 			if (!parentPath?.isCallExpression() || ref.key !== 'callee') {
@@ -199,10 +196,7 @@ export default (path: NodePath): boolean => {
 			let funcBinding: Binding | null | undefined = null;
 			const toRemoveForStringFunc: NodePath[] = [];
 			if (stringFunction.isFunctionDeclaration()) {
-				const idPath = stringFunction.get('id');
-				if (idPath.isIdentifier()) {
-					funcBinding = stringFunction.scope.getBinding(idPath.node.name);
-				}
+				funcBinding = pathAsBinding(stringFunction);
 				toRemoveForStringFunc.push(stringFunction);
 			} else if (stringFunction.isFunctionExpression()) {
 				const assign = stringFunction.parentPath;
@@ -251,14 +245,14 @@ export default (path: NodePath): boolean => {
 				continue;
 			}
 
-			const arrayBinding = arrayId.scope.getBinding(arrayId.node.name);
+			const arrayBinding = pathAsBinding(arrayId);
 
 			if (!arrayBinding) {
 				missedDecoderRef = true;
 				continue;
 			}
 
-			let arrayPath = arrayId.resolve();
+			const arrayPath = arrayId.resolve();
 			if (!arrayPath.isArrayExpression()) {
 				// TODO
 				missedDecoderRef = true;
@@ -285,8 +279,10 @@ export default (path: NodePath): boolean => {
 					array: arrayBinding,
 					toRemove: toRemoveForStringFunc,
 				});
+			/*
 			} else {
 				throw new Error('unexpected');
+			*/
 			}
 
 			const state: { cacheBinding: Binding | null } = { cacheBinding: null };
@@ -297,7 +293,7 @@ export default (path: NodePath): boolean => {
 
 					const cache = cachedValue.get('object');
 					if (!cache.isIdentifier()) return;
-					const cacheBinding = cache.scope.getBinding(cache.node.name);
+					const cacheBinding = pathAsBinding(cache);
 					if (!cacheBinding) return;
 
 					this.cacheBinding = cacheBinding;
@@ -311,9 +307,11 @@ export default (path: NodePath): boolean => {
 		}
 
 		for (const [stringFunction, {array, toRemove}] of stringFunctions.entries()) {
-			let missedStringFuncRef = false;
-			for (const ref of stringFunction.referencePaths) {
-				if (ref.getAncestry().some(ancestor => ancestor.removed)) continue;
+			for (const ref of [...stringFunction.referencePaths]) {
+				if (isRemoved(ref)) {
+					dereferencePathFromBinding(stringFunction, ref);
+					continue;
+				}
 
 				const {parentPath} = ref;
 				if (!parentPath?.isCallExpression() || ref.key !== 'callee') {
@@ -321,25 +319,21 @@ export default (path: NodePath): boolean => {
 						continue;
 					}
 
-					missedStringFuncRef = true;
 					continue;
 				}
 
 				const args = parentPath.get('arguments');
 				if (args.length === 0) {
-					missedStringFuncRef = true;
 					continue;
 				}
 
 				const index = args[0];
 				if (!index.isNumericLiteral()) {
-					missedStringFuncRef = true;
 					continue;
 				}
 
 				const values = stringArrays.get(array);
 				if (!values) {
-					missedStringFuncRef = true;
 					continue;
 				}
 
@@ -348,9 +342,16 @@ export default (path: NodePath): boolean => {
 						decoder(values[index.node.value])
 					)
 				);
-				
+
+				dereferencePathFromBinding(stringFunction, ref);
 				changed = true;
 			}
+			
+			const missedStringFuncRef = stringFunction.references > 0 && (
+				!stringFunction.referencePaths.every(
+					ref => toRemove.some(p => p.isAncestor(ref)),
+				)
+			);
 			if (!missedStringFuncRef) {
 				for (const node of toRemove) {
 					node.remove();
@@ -366,7 +367,7 @@ export default (path: NodePath): boolean => {
 		}
 
 		for (const binding of stringArrays.keys()) {
-			if (!binding.referencePaths.every(ref => ref.getAncestry().some(ancestor => ancestor.removed))) continue;
+			if (!binding.referencePaths.every(isRemoved)) continue;
 			binding.path.remove();
 		}
 	}
@@ -378,7 +379,7 @@ export default (path: NodePath): boolean => {
 	);
 	const decoderPolyfills = new Set<Binding>();
 	for (const binding of codepointDecoders) {
-		if (!binding.referencePaths.every(ref => ref.getAncestry().some(ancestor => ancestor.removed))) continue;
+		if (!binding.referencePaths.every(isRemoved)) continue;
 
 		const state: {
 			decoderPolyfill: Binding | null;
@@ -393,7 +394,7 @@ export default (path: NodePath): boolean => {
 				const callee = argument.get('callee');
 				if (!callee.isIdentifier()) return;
 
-				const binding = callee.scope.getBinding(callee.node.name);
+				const binding = pathAsBinding(callee);
 				if (!binding) return;
 
 				if (!this.decoderPolyfill) {
@@ -411,12 +412,12 @@ export default (path: NodePath): boolean => {
 	}
 
 	for (const binding of decoderPolyfills) {
-		if (!binding.referencePaths.every(ref => ref.getAncestry().some(ancestor => ancestor.removed))) continue;
+		if (!binding.referencePaths.every(isRemoved)) continue;
 		binding.path.remove();
 	}
 
 	for (const binding of stringCaches) {
-		if (!binding.referencePaths.every(ref => ref.getAncestry().some(ancestor => ancestor.removed))) continue;
+		if (!binding.referencePaths.every(isRemoved)) continue;
 		binding.path.remove();
 	}
 

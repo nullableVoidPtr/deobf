@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
 import { type Binding, type NodePath } from '@babel/traverse';
-import { asSingleStatement, pathAsBinding } from '../../utils.js';
+import { asSingleStatement, getPropertyName, pathAsBinding } from '../../utils.js';
 
 function inlineFunction(concealFunction: NodePath<t.FunctionDeclaration>, objId: string) {
 	const switchStmt = asSingleStatement(concealFunction.get('body'));
@@ -106,7 +106,7 @@ export default (path: NodePath): boolean => {
 			let ancestor = child.parentPath;
 			for (const id of ['__proto__', 'constructor', 'name']) {
 				if (!ancestor?.isMemberExpression() || child.key !== 'object') return;
-				if (!ancestor.get('property').isIdentifier({ name: id })) return;
+				if (getPropertyName(ancestor) !== id) return;
 
 				child = ancestor;
 				ancestor = child.parentPath;
@@ -115,7 +115,7 @@ export default (path: NodePath): boolean => {
 			if (!ancestor?.isCallExpression() || child.listKey !== 'arguments') return;
 
 			const callee = ancestor.get('callee');
-			if (!callee.isMemberExpression() || !callee.get('property').isIdentifier({ name: 'push' })) return;
+			if (!callee.isMemberExpression() || getPropertyName(callee) !== 'push') return;
 
 			const func = str.getFunctionParent();
 			if (!func?.isFunctionDeclaration()) return;

@@ -69,7 +69,7 @@ function analyseStringArrayFunction(
 	if (!state.arrayIdentifier) return null;
 	if (!state.arrayData) return null;
 
-	const binding = funcDecl.scope.getBinding(funcDeclIdPath.node.name);
+	const binding = pathAsBinding(funcDecl);
 	if (!binding) {
 		return null;
 	}

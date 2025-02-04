@@ -1,6 +1,7 @@
 import * as t from '@babel/types';
 import { type Binding, type NodePath } from '@babel/traverse';
 import LZString from 'lz-string';
+import { getPropertyName, isRemoved, pathAsBinding } from '../../../utils.js';
 
 export default (path: NodePath): boolean => {
 	let changed = false;
@@ -13,7 +14,7 @@ export default (path: NodePath): boolean => {
 			const state: { isLZString: boolean } = { isLZString: false };
 			func.traverse({
 				ObjectProperty(prop) {
-					if (!prop.get('key').isIdentifier({ name: 'decompressFromUTF16' })) return;
+					if (getPropertyName(prop) !== 'decompressFromUTF16') return;
 
 					this.isLZString = true;
 
@@ -24,12 +25,12 @@ export default (path: NodePath): boolean => {
 			if (!state.isLZString) return;
 
 			const assign = call.parentPath;
-			let binding: Binding | undefined = undefined;
+			let binding: Binding | null = null;
 			if (assign.isVariableDeclarator()) {
 				const idPath = assign.get('id');
 				if (!idPath.isIdentifier()) return;
 
-				binding = idPath.scope.getBinding(idPath.node.name);
+				binding = pathAsBinding(idPath);
 			}
 
 			if (!binding) return;
@@ -39,8 +40,7 @@ export default (path: NodePath): boolean => {
 				const memberExpr = ref.parentPath;
 				if (!memberExpr?.isMemberExpression() || ref.key !== 'object') continue;
 
-				const func = memberExpr.get('property');
-				if (!func.isIdentifier({ name: 'decompressFromUTF16' })) continue;
+				if (getPropertyName(memberExpr) !== 'decompressFromUTF16') continue;
 
 				const call = memberExpr.parentPath;
 				if (!call.isCallExpression()) continue;
@@ -48,11 +48,11 @@ export default (path: NodePath): boolean => {
 				const args = call.get('arguments');
 				if (args.length < 1) continue;
 
-				let compressedStringBinding: Binding | undefined = undefined;
+				let compressedStringBinding: Binding | null = null;
 				let compressedStrings: NodePath = args[0];
 				if (!compressedStrings.isStringLiteral()) {
 					if (!compressedStrings.isIdentifier()) continue;
-					compressedStringBinding = compressedStrings.scope.getBinding(compressedStrings.node.name);
+					compressedStringBinding = pathAsBinding(compressedStrings);
 					if (!compressedStringBinding) continue;
 
 					compressedStrings = compressedStrings.resolve();
@@ -62,16 +62,13 @@ export default (path: NodePath): boolean => {
 				const decompressedAssign = call.parentPath;
 				if (!decompressedAssign.isVariableDeclarator()) continue;
 
-				const decompressedId = decompressedAssign.get('id');
-				if (!decompressedId.isIdentifier()) continue;
-
-				const decompressedBinding = decompressedId.scope.getBinding(decompressedId.node.name);
+				const decompressedBinding = pathAsBinding(decompressedAssign);
 				if (!decompressedBinding) continue;
 
 				for (const decompressedRef of decompressedBinding.referencePaths) {
 					const memberExpr = decompressedRef.parentPath;
 					if (!memberExpr?.isMemberExpression() || decompressedRef.key !== 'object') continue;
-					if (!memberExpr.get('property').isIdentifier({ name: 'split' }) && !memberExpr.node.computed) continue;
+					if (getPropertyName(memberExpr) !== 'split') continue;
 					
 					const splitCall = memberExpr.parentPath;
 					if (!splitCall.isCallExpression() || memberExpr.key !== 'callee') continue;
@@ -95,16 +92,14 @@ export default (path: NodePath): boolean => {
 
 					const arrayAssign = splitCall.parentPath;
 					if (!arrayAssign.isVariableDeclarator()) continue;
-					const arrayId = arrayAssign.get('id');
-					if (!arrayId.isIdentifier()) continue;
-					const arrayBinding = arrayId.scope.getBinding(arrayId.node.name);
+					const arrayBinding = pathAsBinding(arrayAssign);
 					if (!arrayBinding) continue;
 
 					const stringFunction = arrayBinding.referencePaths.find(ref => 
 						ref.parentPath?.isMemberExpression() && ref.key === 'object' && ref.parentPath.parentPath.isReturnStatement()
 					)?.getFunctionParent();
 
-					let stringFuncBinding: Binding | undefined = undefined;
+					let stringFuncBinding: Binding | null = null;
 					if (stringFunction?.isFunctionExpression()) {
 						const funcAssign = stringFunction.parentPath;
 
@@ -117,7 +112,7 @@ export default (path: NodePath): boolean => {
 
 						if (!funcId?.isIdentifier()) continue;
 
-						stringFuncBinding = funcId.scope.getBinding(funcId.node.name);
+						stringFuncBinding = pathAsBinding(funcId);
 					}
 
 					if (!stringFuncBinding) continue;
@@ -155,7 +150,7 @@ export default (path: NodePath): boolean => {
 					if (missed) {
 						splitCall.replaceWith(t.valueToNode(strings));
 					} else {
-						if (stringFuncBinding.constantViolations.length === 2) {
+						if (stringFuncBinding.constantViolations.length <= 2) {
 							if (stringFunction && stringFuncBinding.constantViolations.every(
 								p => p.isAncestor(stringFunction) || (
 									p.isAssignmentExpression({ operator: '=' }) && p.get('right').isIdentifier({ name: 'undefined' })
@@ -163,7 +158,7 @@ export default (path: NodePath): boolean => {
 							)) {
 								stringFuncBinding.path.remove();
 								for (const toRemove of stringFuncBinding.constantViolations) {
-									if (toRemove.getAncestry().some(ancestor => ancestor.removed)) continue;
+									if (isRemoved(toRemove)) continue;
 									toRemove.remove();
 								}
 							}
@@ -178,10 +173,15 @@ export default (path: NodePath): boolean => {
 
 						const stringSetFunc = decompressedAssign.getFunctionParent();
 						if (stringSetFunc?.isFunctionExpression()) {
-							if (stringSetFunc.node.body.body.length === 0) {
-								const call = stringSetFunc.parentPath;
-								if (call.isCallExpression()) {
+							const call = stringSetFunc.parentPath;
+							if (call.isCallExpression()) {
+								if (stringSetFunc.node.body.body.length === 0) {
 									call.remove();
+								} else {
+									const first = stringSetFunc.node.body.body[0];
+									if (first.type === 'ReturnStatement' && !first.argument) {
+										call.remove();
+									}
 								}
 							}
 						}

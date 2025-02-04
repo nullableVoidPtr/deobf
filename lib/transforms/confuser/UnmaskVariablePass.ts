@@ -1,7 +1,7 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
 import UnhoistPass from './UnhoistPass.js';
-import { pathAsBinding } from '../../utils.js';
+import { getPropertyName, isRemoved, pathAsBinding } from '../../utils.js';
 import { crawlProperties } from '../../ObjectBinding.js';
 
 function getFunctionLength(path: NodePath, argsId: string | undefined) {
@@ -13,7 +13,7 @@ function getFunctionLength(path: NodePath, argsId: string | undefined) {
 	const lengthMember = funcLengthAssign.get('left');
 	if (!lengthMember.isMemberExpression()) return null;
 	if (!lengthMember.get('object').isIdentifier(argsId ? { name: argsId } : undefined)) return null;
-	if (!lengthMember.get('property').isIdentifier({ name: 'length' })) return null;
+	if (getPropertyName(lengthMember) !== 'length') return null;
 
 	const lengthPath = funcLengthAssign.get('right');
 	if (!lengthPath.isNumericLiteral()) return null;
@@ -23,6 +23,112 @@ function getFunctionLength(path: NodePath, argsId: string | undefined) {
 
 export default (path: NodePath): boolean => {
 	let changed = false;
+
+	path.traverse({
+		FunctionDeclaration(maskFunc) {
+			const body = maskFunc.get('body').get('body');
+			if (body.length !== 2) return;
+
+			const params = maskFunc.get('params');
+			if (params.length !== 2) return;
+			const [funcArg, lengthArg] = params;
+			if (!funcArg.isIdentifier()) return;
+
+			let defaultLength: number | null = null;
+			if (lengthArg.isAssignmentPattern() && lengthArg.get('left').isIdentifier()) {
+				const right = lengthArg.get('right');
+				if (right.isNumericLiteral()) {
+					defaultLength = right.node.value;
+				}
+			} else if (!lengthArg.isIdentifier()) {
+				return;
+			}
+
+			const [defineStmt, ret] = body;
+			if (!ret.isReturnStatement()) return;
+			if (!ret.get('argument').isIdentifier({ name: funcArg.node.name })) return;
+
+			if (!defineStmt.isExpressionStatement()) return;
+			const call = defineStmt.get('expression');
+			if (!call.isCallExpression()) return;
+			if (!call.get('callee').matchesPattern('Object.defineProperty')) return;
+
+			const definePropertyArgs = call.get('arguments');
+			if (definePropertyArgs.length !== 3) return;
+			if (!definePropertyArgs[0].isIdentifier({ name: funcArg.node.name })) return;
+			if (!definePropertyArgs[1].isStringLiteral({ value: 'length' })) return;
+			
+			const propertySpec = definePropertyArgs[2];
+			if (!propertySpec.isObjectExpression()) return;
+
+			let hasValue = false;
+			let hasConfigurable = false;
+			for (const specProp of propertySpec.get('properties')) {
+				if (!specProp.isObjectProperty()) return;
+
+				const key = getPropertyName(specProp);
+				if (key === 'value') {
+					const value = specProp.get('value');
+					if (!value.isIdentifier()) return;
+					hasValue = true;
+				} else if (key === 'configurable') {
+					const value = specProp.get('value');
+					if (!value.isBooleanLiteral({ value: false })) return;
+					hasConfigurable = true;
+				}
+			}
+
+			if (!hasValue || !hasConfigurable) return;
+
+			const binding = pathAsBinding(maskFunc);
+			if (!binding) return;
+
+			let missed = false;
+			for (const ref of binding.referencePaths) {
+				if (isRemoved(ref)) continue;
+
+				const call = ref.parentPath;
+				if (!call?.isCallExpression() || ref.key !== 'callee') {
+					missed = true;
+					continue;
+				}
+
+				const args = call.get('arguments');
+				if (args.length < 1) {
+					changed = true;
+					continue;
+				}
+
+				const [func, lengthArg] = args;
+
+				let length = defaultLength;
+				if (lengthArg?.isNumericLiteral()) {
+					length = lengthArg.node.value;
+				}
+
+				if (length !== null && func.isIdentifier()) {
+					const binding = pathAsBinding(func);
+					if (binding) {
+						binding.path.setData('fnLength', defaultLength);
+					}
+				}
+
+				if (call.parentPath.isExpressionStatement()) {
+					call.parentPath.remove();
+					changed = true;
+					continue;
+				}
+
+				call.replaceWith(func);
+				changed = true;
+			}
+
+			if (!missed) {
+				maskFunc.remove();
+				changed = true;
+			}
+		}
+	})
 
 	path.traverse({
 		Function(func) {
@@ -50,7 +156,13 @@ export default (path: NodePath): boolean => {
 
 				funcLengthAssignStmt = funcLengthAssignStmt.getNextSibling();
 			}
-			let functionLength = getFunctionLength(funcLengthAssignStmt, argsId.node.name);
+
+
+			let functionLength = getFunctionLength(funcLengthAssignStmt, argsId.node.name)
+			if (functionLength === null) {
+				funcLengthAssignStmt = null;
+				functionLength = func.getData('fnLength', null);
+			}
 
 			func.scope.crawl();
 
@@ -67,6 +179,9 @@ export default (path: NodePath): boolean => {
 			if (functionLength === null) {
 				funcLengthAssignStmt = null;
 				functionLength = 0;
+
+				// TODO: make this edge case more robust
+
 				if (!argsBinding.referenced && argsBinding.constant) {
 					func.node.params = [];
 					return;
@@ -74,7 +189,7 @@ export default (path: NodePath): boolean => {
 			} else {
 				const lengthAssigns = lengthProperty?.constantViolations ?? [];
 				for (const assign of lengthAssigns) {
-					if (firstStatement.isAncestor(assign)) continue;
+					if (funcLengthAssignStmt?.isAncestor(assign)) continue;
 					return;
 				}
 			}
@@ -221,87 +336,6 @@ export default (path: NodePath): boolean => {
 			changed = true;
 		}
 	});
-
-	path.traverse({
-		FunctionDeclaration(maskFunc) {
-			const body = maskFunc.get('body').get('body');
-			if (body.length !== 2) return;
-
-			const params = maskFunc.get('params');
-			if (params.length !== 2) return;
-			const funcArg = params[0];
-			if (!funcArg.isIdentifier()) return;
-
-			const [defineStmt, ret] = body;
-			if (!ret.isReturnStatement()) return;
-			if (!ret.get('argument').isIdentifier({ name: funcArg.node.name })) return;
-
-			if (!defineStmt.isExpressionStatement()) return;
-			const call = defineStmt.get('expression');
-			if (!call.isCallExpression()) return;
-			if (!call.get('callee').matchesPattern('Object.defineProperty')) return;
-
-			const definePropertyArgs = call.get('arguments');
-			if (definePropertyArgs.length !== 3) return;
-			if (!definePropertyArgs[0].isIdentifier({ name: funcArg.node.name })) return;
-			if (!definePropertyArgs[1].isStringLiteral({ value: 'length' })) return;
-			
-			const propertySpec = definePropertyArgs[2];
-			if (!propertySpec.isObjectExpression()) return;
-
-			let hasValue = false;
-			let hasConfigurable = false;
-			for (const specProp of propertySpec.get('properties')) {
-				if (!specProp.isObjectProperty()) return;
-				if (specProp.node.computed) return;
-
-				if (specProp.get('key').isIdentifier({ name: 'value' })) {
-					const value = specProp.get('value');
-					if (!value.isIdentifier()) return;
-					hasValue = true;
-				} else if (specProp.get('key').isIdentifier({ name: 'configurable' })) {
-					const value = specProp.get('value');
-					if (!value.isBooleanLiteral({ value: false})) return;
-					hasConfigurable = true;
-				}
-			}
-
-			if (!hasValue || !hasConfigurable) return;
-
-			const binding = pathAsBinding(maskFunc);
-			if (!binding) return;
-
-			let missed = false;
-			for (const ref of binding.referencePaths) {
-				const call = ref.parentPath;
-				if (!call?.isCallExpression() || ref.key !== 'callee') {
-					missed = true;
-					continue;
-				}
-
-				if (call.parentPath.isExpressionStatement()) {
-					call.parentPath.remove();
-					changed = true;
-					continue;
-				}
-
-				const args = call.get('arguments');
-				if (args.length < 1) {
-					changed = true;
-					continue;
-				}
-
-				const func = args[0];
-				call.replaceWith(func);
-				changed = true;
-			}
-
-			if (!missed) {
-				maskFunc.remove();
-				changed = true;
-			}
-		}
-	})
 
 	path.scope.crawl();
 

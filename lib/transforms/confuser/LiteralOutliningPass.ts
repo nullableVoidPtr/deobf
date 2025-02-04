@@ -1,23 +1,19 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
+import { isUndefined, pathAsBinding } from '../../utils.js';
 
 export default (path: NodePath): boolean => {
 	let changed = false;
 
 	path.traverse({
 		VariableDeclarator(decl) {
-			const idPath = decl.get('id');
-			if (!idPath.isIdentifier()) return;
-
 			const init = decl.get('init');
 			if (!init.isArrayExpression()) return;
 
 			let literals: NodePath<t.Expression>[];
 			try {
 				literals = init.get('elements').map(e => {
-					if (e.isUnaryExpression({ operator: 'void', prefix: true }) && e.get('argument').isNumericLiteral()) {
-						return e;
-					} else if (e.isIdentifier({name: 'undefined' })) {
+					if (e.isExpression() && isUndefined(e)) {
 						return e;
 					} else if (!e.isLiteral()) {
 						throw new Error('unexpected non-literal');
@@ -32,7 +28,8 @@ export default (path: NodePath): boolean => {
 
 			if (literals.length === 0) return;
 
-			const binding = decl.scope.getBinding(idPath.node.name);
+			decl.scope.crawl();
+			const binding = pathAsBinding(decl);
 			if (!binding?.constant) return;
 
 			let missed = false;

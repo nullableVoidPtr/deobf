@@ -1,6 +1,7 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
 import * as bq from 'babylon-query';
+import { pathAsBinding } from '../../utils.js';
 
 const innerFuncSelector = bq.parse(
 	`FunctionExpression:has(VariableDeclarator
@@ -75,7 +76,7 @@ function findDomainLock(path: NodePath): string[] | null {
 	const state: { regex?: RegExp } = {}
 	domainLockCall.traverse({
 		Identifier(regexId) {
-			const binding = regexId.scope.getBinding(regexId.node.name);
+			const binding = pathAsBinding(regexId);
 			const varPath = binding?.path
 			if (!varPath?.isVariableDeclarator()) return;
 
@@ -145,11 +146,7 @@ export default (treePath: NodePath): boolean => {
 
 				const wrappedUse = initCall.parentPath;
 				if (wrappedUse?.isVariableDeclarator()) {
-					const wrappedAssignmentLeft = wrappedUse.get('id');
-					if (!wrappedAssignmentLeft.isIdentifier()) continue;
-
-					const wrappedId = wrappedAssignmentLeft.node.name;
-					const wrappedBinding = wrappedUse.scope.getBinding(wrappedId);
+					const wrappedBinding = pathAsBinding(wrappedUse);
 					if (!wrappedBinding) continue;
 
 					for (const wrappedRef of wrappedBinding.referencePaths) {
@@ -189,26 +186,24 @@ export default (treePath: NodePath): boolean => {
 			const matches = bq.query(innerFunc, debugProtSelector);
 			if (matches.length !== 1) return;
 
-			if (path.node.id) {
-				const binding = path.scope.getBinding(path.node.id.name);
-				if (binding) {
-					for (const reference of binding.referencePaths) {
-						if (path.isAncestor(reference)) continue;
+			const binding = pathAsBinding(path);
+			if (binding) {
+				for (const reference of binding.referencePaths) {
+					if (path.isAncestor(reference)) continue;
 
-						if (!bq.matches(
-							reference,
-							debugCallSelector,
-							{}
-						)) continue;
+					if (!bq.matches(
+						reference,
+						debugCallSelector,
+						{}
+					)) continue;
 
-						const outerDebugProtFunc = reference.getFunctionParent()?.parentPath;
-						if (!outerDebugProtFunc) {
-							console.warn('found inner debug protection function, but could not remove entirely')
-						} else {
-							outerDebugProtFunc.remove();
-						}
-						changed = true;
+					const outerDebugProtFunc = reference.getFunctionParent()?.parentPath;
+					if (!outerDebugProtFunc) {
+						console.warn('found inner debug protection function, but could not remove entirely')
+					} else {
+						outerDebugProtFunc.remove();
 					}
+					changed = true;
 				}
 			}
 
