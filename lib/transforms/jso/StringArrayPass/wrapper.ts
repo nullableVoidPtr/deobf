@@ -1,8 +1,9 @@
 import * as t from '@babel/types';
 import { type Binding, type NodePath } from '@babel/traverse';
-import { dereferencePathFromBinding, inlineProxyCall, Stack } from '../../../utils.js';
+import { dereferencePathFromBinding, getParentingCall, inlineProxyCall, Stack } from '../../../utils.js';
 import LiteralFoldPass from '../../LiteralFoldPass.js';
 import { DecoderInfo } from './decoder.js';
+import { fixCFStorage } from './storage.js';
 
 // TODO(refactor): reference should be wrapper: Binding
 function resolveVarWrapper(decoder: Binding, reference: NodePath): NodePath[] {
@@ -63,6 +64,9 @@ function resolveFuncWrapper(decoder: Binding, reference: NodePath): NodePath[] {
 		return [];
 	}
 	const proxyBody = proxyFunc.get('body');
+
+	fixCFStorage(proxyBody);
+
 	if (proxyBody.isBlockStatement() && proxyBody.node.body.length > 1) {
 		return [];
 	}
@@ -77,14 +81,15 @@ function resolveFuncWrapper(decoder: Binding, reference: NodePath): NodePath[] {
 
 	const newRefs: NodePath[] = [];
 	for (const wrapperRef of binding.referencePaths) {
-		if (wrapperRef.key !== 'callee') {
+		const wrapperCall = getParentingCall(wrapperRef);
+		if (!wrapperCall) {
 			throw new Error(
 				'unexpected reference to wrapper'
 			);
 		}
 
-		const wrapperCall =
-			wrapperRef.parentPath as NodePath<t.CallExpression>;
+		fixCFStorage(wrapperCall);
+
 		const args = wrapperCall.get('arguments');
 		if (
 			!args.every((a): a is NodePath<t.Expression> => a.isExpression())

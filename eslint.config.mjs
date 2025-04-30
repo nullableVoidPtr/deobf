@@ -1,16 +1,22 @@
 import eslint from '@eslint/js';
+import { defineConfig, globalIgnores } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
-export default tseslint.config(
-	{
-		ignores: [
-			'out/**',
-			'src/web_shim.mjs',
-		],
-	},
+export default defineConfig(
+	globalIgnores([
+		'out/**',
+		'src/web_shim.mjs',
+	]),
 	eslint.configs.recommended,
-	...tseslint.configs.recommended,
+	tseslint.configs.recommended,
 	{
+		languageOptions: {
+			parserOptions: {
+				sourceType: 'module',
+				project: './tsconfig.json',
+				tsconfigRootDir: import.meta.dirname,
+			},
+		},
 		rules: {
 			indent: ['error', 'tab'],
 			quotes: ['error', 'single'],

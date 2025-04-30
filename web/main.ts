@@ -1,4 +1,4 @@
 import { makeDeobfuscator } from '../src/web.js';
-import JavascriptObfuscatorTarget from '../lib/targets/JavascriptObfuscatorTarget';
+import JSOTarget from '../lib/targets/JSOTarget.js';
 
-export const deobfuscate = makeDeobfuscator(JavascriptObfuscatorTarget);
+export const deobfuscate = makeDeobfuscator(JSOTarget);

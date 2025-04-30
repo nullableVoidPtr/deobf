@@ -1,8 +1,9 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
 import UnhoistPass from './UnhoistPass.js';
-import { getPropertyName, isRemoved, pathAsBinding } from '../../utils.js';
+import { dereferencePathFromBinding, getCallSites, getPropertyName, isRemoved, pathAsBinding } from '../../utils.js';
 import { crawlProperties } from '../../ObjectBinding.js';
+import { filterBody } from './utils.js';
 
 function getFunctionLength(path: NodePath, argsId: string | undefined) {
 	if (!path.isExpressionStatement()) return null;
@@ -26,7 +27,7 @@ export default (path: NodePath): boolean => {
 
 	path.traverse({
 		FunctionDeclaration(maskFunc) {
-			const body = maskFunc.get('body').get('body');
+			const body = filterBody(maskFunc.get('body.body'));
 			if (body.length !== 2) return;
 
 			const params = maskFunc.get('params');
@@ -83,21 +84,9 @@ export default (path: NodePath): boolean => {
 			const binding = pathAsBinding(maskFunc);
 			if (!binding) return;
 
-			let missed = false;
-			for (const ref of binding.referencePaths) {
-				if (isRemoved(ref)) continue;
-
-				const call = ref.parentPath;
-				if (!call?.isCallExpression() || ref.key !== 'callee') {
-					missed = true;
-					continue;
-				}
-
+			for (const {call, ref} of getCallSites(binding)) {
 				const args = call.get('arguments');
-				if (args.length < 1) {
-					changed = true;
-					continue;
-				}
+				if (args.length < 1) continue;
 
 				const [func, lengthArg] = args;
 
@@ -113,19 +102,19 @@ export default (path: NodePath): boolean => {
 					}
 				}
 
+				dereferencePathFromBinding(binding, ref);
+				changed = true;
+
 				if (call.parentPath.isExpressionStatement()) {
 					call.parentPath.remove();
-					changed = true;
 					continue;
 				}
 
 				call.replaceWith(func);
-				changed = true;
 			}
 
-			if (!missed) {
+			if (binding.referencePaths.every(isRemoved)) {
 				maskFunc.remove();
-				changed = true;
 			}
 		}
 	})
@@ -225,7 +214,7 @@ export default (path: NodePath): boolean => {
 						const [decn] = firstStatement.insertBefore(
 							t.variableDeclaration('var', [decl])
 						);
-						lastDecl = decn.get('declarations')[0];
+						lastDecl = decn.get('declarations.0');
 					} else {
 						[lastDecl] = lastDecl.insertAfter(decl);
 					}
@@ -235,97 +224,6 @@ export default (path: NodePath): boolean => {
 					ref.replaceWith(t.identifier(newId.name));
 				}
 			}
-
-			/*
-			for (const ref of argsBinding.referencePaths) {
-				const parentPath = ref.parentPath;
-
-				if (!parentPath?.isMemberExpression() || ref.key !== 'object') {
-					throw new Error('unexpected non-MemberExpression');
-				}
-
-				if (funcLengthAssignStmt?.isAncestor(parentPath)) continue;
-
-				const property = parentPath.get('property');
-				if (property.isNumericLiteral()) {
-					const index = property.node.value;
-					if (index >= functionLength) {
-						const name = 'var_' + index + '_';
-
-						let newId = localVars.get(name);
-						if (!newId) {
-							localVars.set(name, newId = func.scope.generateUidIdentifier(name));
-							const decl = t.variableDeclarator(t.identifier(newId.name));
-							if (!lastDecl) {
-								const [decn] = firstStatement.insertBefore(
-									t.variableDeclaration('var', [decl])
-								);
-								lastDecl = decn.get('declarations')[0];
-							} else {
-								[lastDecl] = lastDecl.insertAfter(decl);
-							}
-						}
-
-						parentPath.replaceWith(t.identifier(newId.name));
-						changed = true;
-						continue;
-					}
-
-					parentPath.replaceWith(t.identifier(newParams[index].name));
-					changed = true;
-				} else if (property.isUnaryExpression({ operator: '-', prefix: true })) {
-					const argument = property.get('argument');
-					if (!argument.isNumericLiteral()) {
-						throw new Error();
-					}
-					const index = -argument.node.value;
-					if (index === 0) {
-						parentPath.replaceWith(t.identifier(newParams[index].name));
-						changed = true;
-					} else {
-						const name = 'var_minus_' + (+index) + '_';
-
-						let newId = localVars.get(name);
-						if (!newId) {
-							localVars.set(name, newId = func.scope.generateUidIdentifier(name));
-							const decl = t.variableDeclarator(t.identifier(newId.name));
-							if (!lastDecl) {
-								const [decn] = firstStatement.insertBefore(
-									t.variableDeclaration('var', [decl])
-								);
-								lastDecl = decn.get('declarations')[0];
-							} else {
-								[lastDecl] = lastDecl.insertAfter(decl);
-							}
-						}
-
-						parentPath.replaceWith(t.identifier(newId.name));
-						changed = true;
-					}
-				} else if (property.isIdentifier() && !parentPath.node.computed) {
-					const name = property.node.name;
-
-					let newId = localVars.get(name);
-					if (!newId) {
-						localVars.set(name, newId = func.scope.generateUidIdentifier('var_' + name));
-						const decl = t.variableDeclarator(t.identifier(newId.name));
-						if (!lastDecl) {
-							const [decn] = firstStatement.insertBefore(
-								t.variableDeclaration('var', [decl])
-							);
-							lastDecl = decn.get('declarations')[0];
-						} else {
-							[lastDecl] = lastDecl.insertAfter(decl);
-						}
-					}
-
-					parentPath.replaceWith(t.identifier(newId.name));
-					changed = true;
-				} else {
-					throw new Error();
-				}
-			}
-			*/
 
 			func.node.params = newParams;
 			funcLengthAssignStmt?.remove();

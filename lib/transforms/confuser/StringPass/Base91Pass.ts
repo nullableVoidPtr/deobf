@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
 import { type Binding, type NodePath } from '@babel/traverse';
-import { dereferencePathFromBinding, getPropertyName, isRemoved, pathAsBinding } from '../../../utils.js';
+import { dereferencePathFromBinding, getCallSites, getParentingCall, getPropertyName, isRemoved, pathAsBinding } from '../../../utils.js';
 
 function makeBase91Decoder(alphabet: string) {
 	// Reference: https://github.com/aberaud/base91-python/blob/master/base91.py#L42
@@ -92,8 +92,8 @@ function findDecoders(path: NodePath) {
 					if (!memberExpr?.isMemberExpression() || ref.key !== 'object') continue;
 					if (getPropertyName(memberExpr) !== 'indexOf') continue;
 
-					const call = memberExpr.parentPath;
-					if (!call.isCallExpression() || memberExpr.key !== 'callee') continue;
+					const call = getParentingCall(memberExpr);
+					if (!call) continue;
 
 					if (this.alphabet) return;
 					this.alphabet = init.node.value.slice(0, 91);
@@ -173,25 +173,9 @@ export default (path: NodePath): boolean => {
 		const stringFunctions = new Map<Binding, StringFunctionInfo>();
 		const stringArrays = new Map<Binding, string[]>();
 		
-		let missedDecoderRef = false;
-		for (const ref of [...binding.referencePaths]) {
-			if (isRemoved(ref)) continue;
-
-			const {parentPath} = ref;
-			if (!parentPath?.isCallExpression() || ref.key !== 'callee') {
-				if (parentPath && toRemove.some(p => p.isAncestor(parentPath))) {
-					continue;
-				}
-
-				missedDecoderRef = true;
-				continue;
-			}
-		
-			const stringFunction = parentPath.getFunctionParent();
-			if (!stringFunction) {
-				missedDecoderRef = true;
-				continue;
-			}
+		for (const { call } of getCallSites(binding)) {
+			const stringFunction = call.getFunctionParent();
+			if (!stringFunction) continue;
 
 			let funcBinding: Binding | null | undefined = null;
 			const toRemoveForStringFunc: NodePath[] = [];
@@ -222,40 +206,23 @@ export default (path: NodePath): boolean => {
 				}
 			}
 
-			if (!funcBinding) {
-				missedDecoderRef = true;
-				continue;
-			}
+			if (!funcBinding) continue;
 
-			const args = parentPath.get('arguments');
-			if (args.length === 0) {
-				missedDecoderRef = true;
-				continue;
-			}
+			const args = call.get('arguments');
+			if (args.length === 0) continue;
 
 			const encodedArg = args[0];
-			if (!encodedArg.isMemberExpression()) {
-				missedDecoderRef = true;
-				continue;
-			}
+			if (!encodedArg.isMemberExpression()) continue;
 
 			const arrayId = encodedArg.get('object');
-			if (!arrayId.isIdentifier()) {
-				missedDecoderRef = true;
-				continue;
-			}
+			if (!arrayId.isIdentifier()) continue;
 
 			const arrayBinding = pathAsBinding(arrayId);
-
-			if (!arrayBinding) {
-				missedDecoderRef = true;
-				continue;
-			}
+			if (!arrayBinding) continue;
 
 			const arrayPath = arrayId.resolve();
 			if (!arrayPath.isArrayExpression()) {
 				// TODO
-				missedDecoderRef = true;
 				continue;
 			}
 
@@ -269,7 +236,6 @@ export default (path: NodePath): boolean => {
 
 					stringArrays.set(arrayBinding, values);
 				} catch {
-					missedDecoderRef = true;
 					continue;
 				}
 			}
@@ -349,7 +315,7 @@ export default (path: NodePath): boolean => {
 			
 			const missedStringFuncRef = stringFunction.references > 0 && (
 				!stringFunction.referencePaths.every(
-					ref => toRemove.some(p => p.isAncestor(ref)),
+					ref => isRemoved(ref) || toRemove.some(p => p.isAncestor(ref)),
 				)
 			);
 			if (!missedStringFuncRef) {
@@ -357,10 +323,9 @@ export default (path: NodePath): boolean => {
 					node.remove();
 				}
 			}
-			missedDecoderRef = missedDecoderRef || missedStringFuncRef;
 		}
 
-		if (!missedDecoderRef) {
+		if (binding.referencePaths.every(ref => isRemoved(ref) || toRemove.some(p => p.isAncestor(ref)))) {
 			for (const node of toRemove) {
 				node.remove();
 			}

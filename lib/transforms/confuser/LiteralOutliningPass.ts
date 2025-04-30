@@ -21,7 +21,7 @@ export default (path: NodePath): boolean => {
 
 					return e;
 				})
-			} catch (e) {
+			} catch (_) {
 				path.skip();
 				return;
 			}

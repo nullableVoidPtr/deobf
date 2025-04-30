@@ -1,6 +1,110 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
-import { asSingleStatement, pathAsBinding } from '../../utils.js';
+import { asSingleStatement, getPropertyName, pathAsBinding } from '../../utils.js';
+
+function isTimestamp(expr: NodePath): boolean {
+	if (expr.isCallExpression()) {
+		const callee = expr.get('callee');
+		if (callee.matchesPattern('Date.now')) {
+			return true;
+		}
+
+		if (callee.isMemberExpression()) {
+			if (getPropertyName(callee) === 'getTime') {
+				const object = callee.get('object');
+				if (object.isNewExpression()) {
+					if (object.get('callee').isIdentifier({ name: 'Date' })) {
+						return true;
+					}
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+export function extractDateCheck(expr: NodePath<t.Expression>): {
+	type: 'start' | 'end',
+	value: number,
+} | null | undefined {
+	if (expr.isBinaryExpression()) {
+		if (!['<', '>', '<=', '>='].includes(expr.node.operator)) return null;
+
+		const left = expr.get('left');
+		const right = expr.get('right');
+
+		let value;
+		let type: 'start' | 'end';
+		if (isTimestamp(left)) {
+			switch (expr.node.operator) {
+			case '>':
+			case '>=':
+				type = 'end';
+				break;
+			case '<':
+			case '<=':
+				type = 'start';
+				break;
+			default:
+				return undefined;
+			}
+			if (!right.isNumericLiteral()) return undefined;
+			value = right.node.value;
+		} else if (isTimestamp(right)) {
+			switch (expr.node.operator) {
+			case '>':
+			case '>=':
+				type = 'start';
+				break;
+			case '<':
+			case '<=':
+				type = 'end';
+				break;
+			default:
+				return undefined;
+			}
+			if (!left.isNumericLiteral()) return undefined;
+			value = left.node.value;
+		} else {
+			return null;
+		}
+
+
+		return {
+			type,
+			value
+		};
+	}
+
+	return null;
+}
+
+export function extractDomainLock(expr: NodePath<t.Expression>): string | null | undefined {
+	if (expr.isUnaryExpression({ operator: '!', prefix: true })) {
+		const call = expr.get('argument');
+		if (!call.isCallExpression()) return null;
+
+		if (!call.get('arguments.0')?.matchesPattern('window.location.href')) return null;
+
+		const callee = call.get('callee');
+		if (!callee.isMemberExpression()) return null;
+		if (getPropertyName(callee) !== 'test') return null;
+
+		const regexp = callee.get('object');
+		if (!regexp.isNewExpression()) return null;
+		if (!regexp.get('callee').isIdentifier({ name: 'RegExp' })) return null;
+
+		const pattern = regexp.get('arguments.0');
+		if (pattern.isStringLiteral()) {
+			return pattern.node.value;
+		}
+
+		return undefined;
+	}
+
+	return null;
+}
 
 export function filterBody(body: NodePath<t.Statement>[]) {
 	return body.filter(stmt => {
@@ -17,6 +121,14 @@ export function filterBody(body: NodePath<t.Statement>[]) {
 					!ancestor.hasNode()
 				)
 			))
+		}
+		
+		if (stmt.isDebuggerStatement()) return false;
+		if (stmt.isIfStatement() && !stmt.get('alternate').hasNode()) {
+			const test = stmt.get('test');
+			if (extractDateCheck(test) !== null || extractDomainLock(test) !== null) {
+				return false;
+			}
 		}
 
 		return true;

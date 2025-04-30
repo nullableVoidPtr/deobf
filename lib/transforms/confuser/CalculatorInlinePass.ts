@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
-import { asSingleStatement, pathAsBinding } from '../../utils.js';
+import { asSingleStatement, getParentingCall, pathAsBinding } from '../../utils.js';
 
 export default (path: NodePath): boolean => {
 	let changed = false;
@@ -41,8 +41,8 @@ export default (path: NodePath): boolean => {
 			}
 
 			function inlineExpr(ref: NodePath) {
-				const call = ref.parentPath;
-				if (!call?.isCallExpression() || ref.key !== 'callee') return false;
+				const call = getParentingCall(ref);
+				if (!call) return false;
 
 				const args = call.get('arguments');
 				if (args.length < 3) return false;

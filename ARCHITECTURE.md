@@ -4,7 +4,7 @@ At a high-level, `deobf` is focuses on AST-AST deobfuscation; generally speaking
 * Transformation
 
 # Program structure
-deobf has multiple "targets" to deobfuscate, focusing on a specific obfuscator; the only maintained target is the one for JavaScript Obfuscator, however, as deobf is a framework, more targets, potentially with specialised passes, can be implemented.
+deobf has multiple "targets" to deobfuscate, however, as deobf is a framework, more targets, potentially with specialised passes, can be implemented.
 
 ## Targets
 A target is a sequence of passes, specified in `lib/targets/` using the `TargetComposer` function; an example, the `TerserTarget`, is illustrated below:

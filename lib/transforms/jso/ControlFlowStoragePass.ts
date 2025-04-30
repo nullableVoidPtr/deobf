@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
 import { type Binding, type NodePath, type Scope } from '@babel/traverse';
-import { inlineProxyCall, pathAsBinding } from '../../utils.js';
+import { getParentingCall, inlineProxyCall, isLooselyConstantBinding, isRemoved, pathAsBinding } from '../../utils.js';
 import LiteralFoldPass from '../LiteralFoldPass.js';
 import DeadCodeRemovalPass from './DeadCodeRemovalPass.js';
 import { crawlProperties, PropertyBinding } from '../../ObjectBinding.js';
@@ -18,6 +18,7 @@ export default (path: NodePath): boolean => {
 				>;
 				mutated: boolean;
 		}[]>(),
+		missedBindings: new Set<Binding>(),
 	};
 
 	path.traverse({
@@ -60,7 +61,21 @@ export default (path: NodePath): boolean => {
 							propertyMap.set(property, valuePath);
 						}
 					} else {
-						return;
+						for (const ref of property.referencePaths) {
+							if (isRemoved(ref)) continue;
+
+							// Handle edge-case where dead code contains synthetic reference to storage object
+							const test = ref.findParent(p => p.isIfStatement())?.get('test');
+							if (!test?.isCallExpression()) return;
+
+							const callee = test.get('callee');
+							if (!callee.isMemberExpression()) return;
+
+							const object = callee.get('object');
+							if (!object.isIdentifier()) return;
+
+							if (!binding.referencePaths.includes(object)) return;
+						}
 					}
 
 				}
@@ -179,10 +194,10 @@ export default (path: NodePath): boolean => {
 				);
 
 				for (const {property, reference, valuePath} of nestedReferences) {
-					if (reference.find(p => p.removed)) continue;
+					if (isRemoved(reference)) continue;
 
-					const callPath = reference.parentPath;
-					if (!callPath?.isCallExpression() || reference.key !== 'callee') {
+					const callPath = getParentingCall(reference);
+					if (!callPath) {
 						throw new Error('unexpected call expression');
 					}
 
@@ -232,13 +247,17 @@ export default (path: NodePath): boolean => {
 					if (!mutated) {
 						const { parentPath } = binding.path;
 						if (!parentPath?.isVariableDeclaration()) continue;
-						if (parentPath.node.kind !== 'const') continue;
+						if (parentPath.node.kind !== 'const') {
+							if (!isLooselyConstantBinding(binding)) continue;
+						}
 						if (![...propertyMap.keys()].every((k => typeof k.key === 'string' && k.key.match(/^\w{5}$/)))) continue;
 					}
 
-					if (binding.referencePaths.filter(r => r.find(p => p.removed || !p.hasNode()) === null).length === 0) {
+					if (binding.referencePaths.filter(r => !isRemoved(r)).length === 0) {
 						binding.path.remove();
 						binding.scope.removeBinding(binding.identifier.name);
+					} else {
+						this.missedBindings.add(binding);
 					}
 				}
 

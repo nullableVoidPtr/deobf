@@ -33,6 +33,10 @@ export class PropertyBinding {
 
 		this.isPrivate = property.isPrivateName();
 		this.key = PropertyBinding.resolveProperty(property, computed, this.objectIsArray);
+
+		if (this.path?.isObjectProperty()) {
+			this.valuePath = this.path.get('value');
+		}
 	}
 
 	dereference(reference: NodePath) {
@@ -138,7 +142,7 @@ export function crawlProperties(objectBinding: Binding, objectIsArray = false): 
 	const unresolvedReferences = new Set<NodePath<t.MemberExpression | t.OptionalMemberExpression>>();
 	const objectReferences = new Set<NodePath>();
 
-	if (!objectBinding.constant) {
+	if (!objectBinding.constant && objectBinding.kind !== 'const') {
 		const isVarConst = objectBinding.kind === 'var' && objectBinding.constantViolations.length === 1 && objectBinding.constantViolations[0] == objectBinding.path;
 		if (!isVarConst) {
 			return {

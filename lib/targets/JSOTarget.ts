@@ -1,5 +1,5 @@
 import TargetComposer from './TargetComposer.js';
-import * as JSOP from '../transforms/javascript-obfuscator/mod.js';
+import * as JSOP from '../transforms/jso/mod.js';
 import * as BlockStatementPass from '../transforms/BlockStatementPass.js';
 import * as ConditionalStatementPass from '../transforms/ConditionalStatementPass.js';
 import * as LiteralFoldPass from '../transforms/LiteralFoldPass.js';

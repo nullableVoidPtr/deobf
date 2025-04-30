@@ -76,8 +76,10 @@ export default (path: NodePath): boolean => {
 				const innerFuncSource = innerFuncSpec.at(-1);
 				if (!innerFuncSource?.isStringLiteral()) return;
 
+				const code = innerFuncSource.node.value;
+
 				const innerFuncBody = parse(
-					innerFuncSource.node.value,
+					code,
 					{
 						sourceType: 'script',
 						allowAwaitOutsideFunction: true,
@@ -96,6 +98,13 @@ export default (path: NodePath): boolean => {
 						),
 					)
 				);
+
+				newInnerFunc.hub = {
+					getCode: () => code,
+					getScope: () => newInnerFunc.scope,
+					buildError: () => { throw new Error() },
+					addHelper: () => { throw new Error() },
+				}
 
 				changed = true;
 
@@ -139,7 +148,7 @@ export default (path: NodePath): boolean => {
 										}
 									}
 
-									newInnerFunc.get('params')[0].remove();
+									newInnerFunc.get('params.0').remove();
 									arg.remove();
 									changed = true;
 									continue;
@@ -147,27 +156,27 @@ export default (path: NodePath): boolean => {
 							}
 						}
 
-						const bodyStmt = newInnerFunc.get('body').get('body')[0];
 						const paramDecl = t.variableDeclarator(
 							param,
 							arg?.node ?? null,
 						);
 						if (!lastParamDecl) {
-							const [decn] = bodyStmt.insertBefore(
+							const [decn] = newInnerFunc.get('body').unshiftContainer(
+								'body',
 								t.variableDeclaration(
 									'var',
 									[paramDecl],
 								)
 							);
 
-							lastParamDecl = decn.get('declarations')[0];
+							lastParamDecl = decn.get('declarations.0');
 						} else {
 							lastParamDecl.insertAfter([
 								paramDecl
 							]);
 						}
 
-						newInnerFunc.get('params')[0].remove();
+						newInnerFunc.get('params.0').remove();
 						arg?.remove();
 						changed = true;
 					}
@@ -210,7 +219,11 @@ export default (path: NodePath): boolean => {
 									state.returnStmt.replaceWith(argument.node);
 								}
 							}
-							stmt.replaceWithMultiple(newInnerFunc.get('body').node.body);
+
+							const newStmts = stmt.replaceWithMultiple(newInnerFunc.get('body').node.body);
+							for (const stmt of newStmts) {
+								stmt.hub = newInnerFunc.hub;
+							}
 						}
 					}
 				}

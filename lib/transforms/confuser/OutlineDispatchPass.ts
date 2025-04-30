@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
 import { type Binding, type NodePath } from '@babel/traverse';
-import { asSingleStatement, getPropertyName, pathAsBinding } from '../../utils.js';
+import { asSingleStatement, dereferencePathFromBinding, getCallLikeSites, getPropertyName, isRemoved, pathAsBinding } from '../../utils.js';
 import { filterBody } from './utils.js';
 import { unhoistFunctionParams } from './UnhoistPass.js';
 
@@ -15,14 +15,17 @@ function fixDispatchedFunction(func: NodePath<t.FunctionExpression>, newFuncName
 		}
 
 		if (newVars.length > 0) {
-			func.get('body').get('body')[0].insertBefore(t.variableDeclaration(
-				'var',
-				newVars.map(id => t.variableDeclarator(t.identifier(id))),
-			));
+			func.get('body').unshiftContainer(
+				'body',
+				t.variableDeclaration(
+					'var',
+					newVars.map(id => t.variableDeclarator(t.identifier(id))),
+				),
+			);
 		}
 	}
 
-	const body = filterBody(func.get('body').get('body'));
+	const body = filterBody(func.get('body.body'));
 	let argsDecn: NodePath | null = null
 	let argsPattern: NodePath | null = null;
 	for (const stmt of body) {
@@ -30,7 +33,7 @@ function fixDispatchedFunction(func: NodePath<t.FunctionExpression>, newFuncName
 		if (!stmt?.isVariableDeclaration()) break;
 		if (stmt.node.declarations.length !== 1) continue;
 
-		const argsDecl = stmt.get('declarations')[0];
+		const argsDecl = stmt.get('declarations.0');
 		if (!argsDecl.get('init').isIdentifier({ name: argsArrayName })) continue;
 
 		argsPattern = argsDecl.get('id');
@@ -201,7 +204,7 @@ export default (path: NodePath): boolean => {
 			if (!objReturn?.isReturnStatement()) return;
 			const objReturnObj = objReturn.get('argument');
 			if (!objReturnObj.isObjectExpression() || objReturnObj.node.properties.length !== 1) return;
-			const objReturnProp = objReturnObj.get('properties')[0];
+			const objReturnProp = objReturnObj.get('properties.0');
 			if (!objReturnProp.isObjectProperty()) return;
 			const objReturnKey = getPropertyName(objReturnProp);
 			if (objReturnKey === null) return;
@@ -210,40 +213,25 @@ export default (path: NodePath): boolean => {
 			if (!alternate.hasNode()) {
 				alternate = objReturnIfStmt.getNextSibling();
 			} else if (alternate.isBlockStatement()) {
-				alternate = alternate.get('body')[0];
+				alternate = alternate.get('body.0');
 			}
 			if (!alternate.isReturnStatement()) return;
 
-			let missed = false;
 			const outlinedFuncs = new Map<string, string | null>();
-			for (const ref of dispatcherBinding.referencePaths) {
-				const call = ref.parentPath;
-				if (!(call?.isCallExpression() || call?.isNewExpression()) || ref.key !== 'callee') {
-					missed = true;
-					continue;
-				}
-
-				const dispatcherArgs = (<NodePath<t.CallExpression | t.NewExpression>>call).get('arguments');
-				if (dispatcherArgs.length < 1) {
-					missed = true;
-					continue;
-				}
+			for (const { call, ref } of getCallLikeSites(dispatcherBinding)) {
+				const dispatcherArgs = call.get('arguments');
+				if (dispatcherArgs.length < 1) continue;
 				
 				const nameArg = dispatcherArgs[0];
-				if (!nameArg.isStringLiteral()) {
-					missed = true;
-					continue;
-				}
+				if (!nameArg.isStringLiteral()) continue;
 
 				const funcName = nameArg.node.value
 				let outlinedFuncName = outlinedFuncs.get(funcName);
 				if (outlinedFuncName === null) {
-					missed = true;
 					continue;
 				} else if (outlinedFuncName === undefined) {
 					const func = funcs.get(nameArg.node.value);
 					if (!func) {
-						missed = true;
 						continue;
 					}
 
@@ -251,7 +239,6 @@ export default (path: NodePath): boolean => {
 					const outlined = fixDispatchedFunction(func, generatedName, argArrayBinding.identifier.name);
 					if (!outlined) {
 						outlinedFuncs.set(funcName, null);
-						missed = true;
 						continue;
 					}
 					
@@ -290,7 +277,6 @@ export default (path: NodePath): boolean => {
 						if (sequence?.isExpressionStatement()) {
 							const prev = sequence.getPrevSibling();
 							if (!prev.isExpressionStatement()) {
-								missed = true;
 								continue;
 							}
 							
@@ -300,24 +286,21 @@ export default (path: NodePath): boolean => {
 							argAssign = ancestor.getPrevSibling() as NodePath<t.Expression>;
 							ancestor = sequence;
 						} else {
-							missed = true;
 							continue;
 						}
 
-						if (!argAssign.isAssignmentExpression({ operator: '=' }) || !argAssign.get('left').isIdentifier({ name: argArrayBinding.identifier.name })) {
-							missed = true;
-							continue;
-						}
+						if (!argAssign.isAssignmentExpression({ operator: '=' })) continue;
+						const argAssignee = argAssign.get('left');
+						if (!argAssignee.isIdentifier({ name: argArrayBinding.identifier.name })) continue;
+						dereferencePathFromBinding(argArrayBinding, argAssignee);
 
 						const array = argAssign.get('right');
 						if (!array.isArrayExpression()) {
-							missed = true;
 							continue;
 						}
 
 						const elements = array.get('elements');
 						if (!elements.every(e => e.hasNode())) {
-							missed = true;
 							continue;
 						}
 
@@ -340,11 +323,12 @@ export default (path: NodePath): boolean => {
 				}
 
 				ancestor.replaceWith(result);
+				dereferencePathFromBinding(dispatcherBinding, ref);
 				changed = true;
 			}
 
-			if (!missed) {
-				dispatcherFunc.remove();
+			if (dispatcherBinding.referencePaths.every(isRemoved)) {
+				dispatcherBinding.path.remove();
 				argArrayBinding.path.remove();
 				funcCacheBinding?.path.remove();
 			}

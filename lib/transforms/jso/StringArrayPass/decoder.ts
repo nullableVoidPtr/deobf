@@ -150,7 +150,7 @@ export default function findDecoders(
 		}
 
 
-		const firstArg = decoderPath.get('params')[0];
+		const firstArg = decoderPath.get('params.0');
 		if (!firstArg.isIdentifier()) {
 			throw new Error('unexpected non-Identifier as first parameter');
 		}
@@ -166,21 +166,33 @@ export default function findDecoders(
 			}
 
 			const write = p.constantViolations[0];
-			if (!write.isAssignmentExpression({ operator: '=' })) {
+			if (write.isAssignmentExpression({ operator: '=' })) {
+				const valuePath = write.get('right');
+				if (!valuePath.isBinaryExpression({ operator: '-' })) {
+					throw new Error('unexpected constant violation value');
+				}
+
+				const sourcePath = valuePath.get('left');
+				if (!sourcePath.isIdentifier({ name: p.identifier.name })) {
+					throw new Error('unexpected constant violation value');
+				}
+
+				const shiftPath = valuePath.get('right');
+				if (!shiftPath.isNumericLiteral()) {
+					throw new Error('unexpected constant violation value');
+				}
+
+				shift = -shiftPath.node.value;
+			} else if (write.isAssignmentExpression({ operator: '-=' })) {
+				const shiftPath = write.get('right');
+				if (!shiftPath.isNumericLiteral()) {
+					throw new Error('unexpected constant violation value');
+				}
+
+				shift = -shiftPath.node.value;
+			} else {
 				throw new Error('unexpected constant violation');
 			}
-
-			const valuePath = write.get('right');
-			if (!valuePath.isBinaryExpression({ operator: '-' })) {
-				throw new Error('unexpected constant violation value');
-			}
-
-			const shiftPath = valuePath.get('right');
-			if (!shiftPath.isNumericLiteral()) {
-				throw new Error('unexpected constant violation value');
-			}
-
-			shift = -shiftPath.node.value;
 		}
 
 		const state = {
@@ -192,6 +204,7 @@ export default function findDecoders(
 		}
 		decoderPath.traverse({
 			CallExpression(atobPath: NodePath<t.CallExpression>) {
+				// Pre-1.3.0 polyfilled and called a globalThis variable
 				if (t.isIdentifier(atobPath.node.callee, { name: 'atob' })) {
 					this.curry = b64DecCurry(this.curry, defaultCharMap);
 					this.isBase64 = true;
@@ -200,6 +213,7 @@ export default function findDecoders(
 				}
 			},
 			FunctionExpression(atobPath: NodePath<t.FunctionExpression>) {
+				// Scan for post-1.3.0 atob implementation
 				if (this.isBase64) return;
 
 				if (!atobPath.parentPath?.isVariableDeclarator()) return;
@@ -236,34 +250,57 @@ export default function findDecoders(
 				this.isBase64 = false; 
 				atobPath.traverse({
 					StringLiteral(charMapPath: NodePath<t.StringLiteral>) {
-						if (
-							!charMapPath.parentPath?.isVariableDeclarator() ||
-							charMapPath.node.value == ''
-						) return;
+						// Usually a swapped-case alphabet, but handle any permutations of the alphabet
+						if (charMapPath.node.value === '') return;
+
+						const parentPath = charMapPath.parentPath;
+						if (!parentPath?.isVariableDeclarator()) {
+							// Sometimes the const alphabet binding is inlined in minification since it gets used only once, handle accordingly
+							if (!parentPath.isMemberExpression() || !parentPath.get('property').isIdentifier({ name: 'indexOf' })) {
+								return;
+							}
+
+							const indexOfCall = parentPath.parentPath;
+							if (!indexOfCall.isCallExpression()) return;
+							const indexOfArgs = indexOfCall.get('arguments');
+							if (indexOfArgs.length < 1) return;
+							const bufferId = indexOfArgs[0];
+							if (!bufferId.isIdentifier()) return;
+							
+							const assign = indexOfCall.parentPath;
+							if (!assign.isAssignmentExpression({ operator: '=' }) || indexOfCall.key !== 'right') return;
+							if (!assign.get('left').isIdentifier({ name: bufferId.node.name })) return;
+						}
 						this.curry = b64DecCurry(this.curry, charMapPath.node.value);
 						this.isBase64 = true;
 						charMapPath.stop();
 					},
 				}, this);
 			},
-			BinaryExpression(encryptExprPath: NodePath<t.BinaryExpression>) {
-				if (
-					!this.isBase64 ||
-					encryptExprPath.node.operator != '^' ||
-					(!(
-						t.isMemberExpression(encryptExprPath.node.right) &&
-						t.isBinaryExpression(encryptExprPath.node.right.property, {
-							operator: '%',
-						})
-					) && !(
-						t.isMemberExpression(encryptExprPath.node.left) &&
-						t.isBinaryExpression(encryptExprPath.node.left.property, {
-							operator: '%',
-						})
-					))
-				) return;
+			BinaryExpression(decryptExprPath: NodePath<t.BinaryExpression>) {
+				if (!this.isBase64) return;
+				if (decryptExprPath.node.operator !== '^') return;
+
+				const isSIndex = (node: t.PrivateName | t.Expression) => {
+					if (!t.isMemberExpression(node)) return false;
+					const sArray = node.object;
+					if (!t.isIdentifier(sArray)) return false;
+
+					if (!t.isBinaryExpression(node.property, { operator: '%' })) return false;
+					if (!t.isNumericLiteral(node.property.right, { value: 256 })) return false;
+
+					const index = node.property.left;
+					if (!t.isBinaryExpression(index, { operator: '+' })) return false;
+					if (!t.isMemberExpression(index.left)) return false;
+					if (!t.isIdentifier(index.left.object, { name: sArray.name })) return false;
+					if (!t.isMemberExpression(index.right)) return false;
+					if (!t.isIdentifier(index.right.object, { name: sArray.name })) return false;
+
+					return true;
+				}; 
+				if (!isSIndex(decryptExprPath.node.left) && !(isSIndex(decryptExprPath.node.right))) return;
 				this.curry = rc4Curry(this.curry);
-				encryptExprPath.stop();
+				decryptExprPath.stop();
 			},
 		}, state);
 		results.set(binding, { decoder: state.curry, data, arrayBinding });

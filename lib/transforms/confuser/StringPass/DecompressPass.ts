@@ -1,7 +1,7 @@
 import * as t from '@babel/types';
 import { type Binding, type NodePath } from '@babel/traverse';
 import LZString from 'lz-string';
-import { getPropertyName, isRemoved, pathAsBinding } from '../../../utils.js';
+import { dereferencePathFromBinding, getParentingCall, getPropertyName, isRemoved, pathAsBinding } from '../../../utils.js';
 
 export default (path: NodePath): boolean => {
 	let changed = false;
@@ -35,8 +35,8 @@ export default (path: NodePath): boolean => {
 
 			if (!binding) return;
 
-			let missed = false;
-			for (const ref of binding.referencePaths) {
+			const decompressedStrings = new Map<Binding, string>();
+			for (const ref of [...binding.referencePaths]) {
 				const memberExpr = ref.parentPath;
 				if (!memberExpr?.isMemberExpression() || ref.key !== 'object') continue;
 
@@ -59,19 +59,56 @@ export default (path: NodePath): boolean => {
 					if (!compressedStrings.isStringLiteral()) continue;
 				}
 
-				const decompressedAssign = call.parentPath;
-				if (!decompressedAssign.isVariableDeclarator()) continue;
+				let decompressedString;
+				try {
+					decompressedString = LZString.decompressFromUTF16(compressedStrings.node.value);
+				} catch {
+					continue;
+				}
 
-				const decompressedBinding = pathAsBinding(decompressedAssign);
+				if (!decompressedString) continue;
+
+				call.replaceWith(t.stringLiteral(decompressedString));
+				dereferencePathFromBinding(binding, ref);
+
+				if (compressedStringBinding) {
+					if (compressedStringBinding.constantViolations.length <= 1) {
+						if (compressedStringBinding.referencePaths.every(ref => isRemoved(ref) || call.isAncestor(ref))) {
+							compressedStringBinding.path.remove();
+							for (const assign of compressedStringBinding.constantViolations) {
+								if (isRemoved(assign)) continue;
+								assign.remove();
+							}
+						}
+					}
+				}
+
+				const decompressedAssign = call.parentPath;
+				let decompressedBinding;
+				if (decompressedAssign.isVariableDeclarator()) {
+					decompressedBinding = pathAsBinding(decompressedAssign);
+				} else if (decompressedAssign.isAssignmentExpression({ operator: '=' })) {
+					const assignee = decompressedAssign.get('left');
+					if (!assignee.isIdentifier()) continue;
+
+					decompressedBinding = pathAsBinding(assignee);
+					if (decompressedBinding?.constantViolations.length !== 1) continue;
+				}
+
 				if (!decompressedBinding) continue;
 
-				for (const decompressedRef of decompressedBinding.referencePaths) {
-					const memberExpr = decompressedRef.parentPath;
-					if (!memberExpr?.isMemberExpression() || decompressedRef.key !== 'object') continue;
+				decompressedStrings.set(decompressedBinding, decompressedString);
+			}
+		
+			const stringArrays = new Map<Binding, string[]>();
+			for (const [decompressedBinding, decompressedString] of decompressedStrings) {
+				for (const ref of [...decompressedBinding.referencePaths]) {
+					const memberExpr = ref.parentPath;
+					if (!memberExpr?.isMemberExpression() || ref.key !== 'object') continue;
 					if (getPropertyName(memberExpr) !== 'split') continue;
 					
-					const splitCall = memberExpr.parentPath;
-					if (!splitCall.isCallExpression() || memberExpr.key !== 'callee') continue;
+					const splitCall = getParentingCall(memberExpr);
+					if (!splitCall) continue;
 					
 					const args = splitCall.get('arguments');
 					if (args.length < 1) continue;
@@ -79,144 +116,151 @@ export default (path: NodePath): boolean => {
 					const delimiterPath = args[0];
 					if (!delimiterPath.isStringLiteral()) continue;
 
-					const delimiter = delimiterPath.node.value;
+					const strings = decompressedString.split(delimiterPath.node.value);
+					splitCall.replaceWith(t.arrayExpression(
+						strings.map(t.stringLiteral),
+					));
 
-					let strings: string[] | null = null;
-					try {
-						strings = LZString.decompressFromUTF16(compressedStrings.node.value).split(delimiter)
-					} catch {
-						continue;
-					}
-
-					if (!strings) continue;
+					dereferencePathFromBinding(decompressedBinding, ref);
 
 					const arrayAssign = splitCall.parentPath;
-					if (!arrayAssign.isVariableDeclarator()) continue;
-					const arrayBinding = pathAsBinding(arrayAssign);
+					let arrayBinding
+					if (arrayAssign.isVariableDeclarator()) {
+						arrayBinding = pathAsBinding(arrayAssign);
+					} else if (arrayAssign.isAssignmentExpression({ operator: '=' })) {
+						const assignee = arrayAssign.get('left');
+						if (!assignee.isIdentifier()) continue;
+
+						arrayBinding = pathAsBinding(assignee);
+						if (arrayBinding?.constantViolations.length !== 1) continue;
+					}
 					if (!arrayBinding) continue;
 
-					const stringFunction = arrayBinding.referencePaths.find(ref => 
-						ref.parentPath?.isMemberExpression() && ref.key === 'object' && ref.parentPath.parentPath.isReturnStatement()
-					)?.getFunctionParent();
+					stringArrays.set(arrayBinding, strings);
+				}
 
-					let stringFuncBinding: Binding | null = null;
-					if (stringFunction?.isFunctionExpression()) {
-						const funcAssign = stringFunction.parentPath;
+				if (decompressedBinding.referencePaths.every(isRemoved)) {
+					decompressedBinding.path.remove();
+					for (const assign of decompressedBinding.constantViolations) {
+						if (isRemoved(assign)) continue;
+						assign.remove();
+					}
+				}
+			}
 
-						let funcId;
-						if (funcAssign.isAssignmentExpression({ operator: '=' })) {
-							funcId = funcAssign.get('left');
-						} else if (funcAssign.isVariableDeclarator()) {
-							funcId = funcAssign.get('id');
-						}
+			for (const [arrayBinding, strings] of stringArrays) {
+				const stringFunction = arrayBinding.referencePaths.find(ref => 
+					ref.parentPath?.isMemberExpression() && ref.key === 'object' && ref.parentPath.parentPath.isReturnStatement()
+				)?.getFunctionParent();
 
-						if (!funcId?.isIdentifier()) continue;
+				let stringFuncBinding: Binding | null = null;
+				if (stringFunction?.isFunctionExpression()) {
+					const funcAssign = stringFunction.parentPath;
 
-						stringFuncBinding = pathAsBinding(funcId);
+					let funcId;
+					if (funcAssign.isAssignmentExpression({ operator: '=' })) {
+						funcId = funcAssign.get('left');
+					} else if (funcAssign.isVariableDeclarator()) {
+						funcId = funcAssign.get('id');
 					}
 
-					if (!stringFuncBinding) continue;
+					if (!funcId?.isIdentifier()) continue;
 
-					for (const ref of stringFuncBinding.referencePaths) {
-						const stringCall = ref.parentPath;
-						if (!stringCall?.isCallExpression()) {
-							missed = true;
-							continue;
-						}
+					stringFuncBinding = pathAsBinding(funcId);
+				} else {
+					continue;
+				}
 
-						const args = stringCall.get('arguments');
-						if (args.length < 1) {
-							missed = true;
-							continue;
-						}
+				if (!stringFuncBinding) continue;
 
-						const indexEvaluation = args[0].evaluate();
-						if (!indexEvaluation.confident) {
-							missed = true;
-							continue;
-						}
+				for (const ref of [...stringFuncBinding.referencePaths]) {
+					const stringCall = ref.parentPath;
+					if (!stringCall?.isCallExpression()) continue;
 
-						const index = indexEvaluation.value
-						if (typeof index !== 'number') {
-							missed = true;
-							continue;
-						}
+					const args = stringCall.get('arguments');
+					if (args.length < 1) continue;
 
-						stringCall.replaceWith(t.stringLiteral(strings[index]));
-					}
+					const indexEvaluation = args[0].evaluate();
+					if (!indexEvaluation.confident) continue;
 
-					compressedStringBinding?.path?.remove();
-					decompressedAssign.remove();
-					if (missed) {
-						splitCall.replaceWith(t.valueToNode(strings));
-					} else {
-						if (stringFuncBinding.constantViolations.length <= 2) {
-							if (stringFunction && stringFuncBinding.constantViolations.every(
-								p => p.isAncestor(stringFunction) || (
-									p.isAssignmentExpression({ operator: '=' }) && p.get('right').isIdentifier({ name: 'undefined' })
-								)
-							)) {
-								stringFuncBinding.path.remove();
-								for (const toRemove of stringFuncBinding.constantViolations) {
-									if (isRemoved(toRemove)) continue;
-									toRemove.remove();
-								}
+					const index = indexEvaluation.value
+					if (typeof index !== 'number') continue;
+
+					stringCall.replaceWith(t.stringLiteral(strings[index]));
+					dereferencePathFromBinding(stringFuncBinding, ref);
+				}
+
+				if (stringFuncBinding.referencePaths.every(isRemoved)) {
+					if (stringFuncBinding.constantViolations.length <= 2) {
+						if (stringFunction && stringFuncBinding.constantViolations.every(
+							p => p.isAncestor(stringFunction) || (
+								p.isAssignmentExpression({ operator: '=' }) && p.get('right').isIdentifier({ name: 'undefined' })
+							)
+						)) {
+							stringFuncBinding.path.remove();
+							for (const toRemove of stringFuncBinding.constantViolations) {
+								if (isRemoved(toRemove)) continue;
+								toRemove.remove();
 							}
 						}
+					}
 
-						if (stringFunction?.parentPath.isAssignmentExpression({ operator: '=' })) {
-							stringFunction.parentPath.remove();
-						} else {
-							stringFunction?.remove();
-						}
-						arrayBinding.path.remove()
+					if (stringFunction?.parentPath.isAssignmentExpression({ operator: '=' })) {
+						stringFunction.parentPath.remove();
+					} else {
+						stringFunction?.remove();
+					}
+					arrayBinding.path.remove();
+					for (const assign of arrayBinding.constantViolations) {
+						if (isRemoved(assign)) continue;
+						assign.remove();
+					}
 
-						const stringSetFunc = decompressedAssign.getFunctionParent();
-						if (stringSetFunc?.isFunctionExpression()) {
-							const call = stringSetFunc.parentPath;
-							if (call.isCallExpression()) {
-								if (stringSetFunc.node.body.body.length === 0) {
+					const stringSetFunc = stringFunction.getFunctionParent();
+					if (stringSetFunc?.isFunctionExpression()) {
+						const call = stringSetFunc.parentPath;
+						if (call.isCallExpression()) {
+							if (stringSetFunc.node.body.body.length === 0) {
+								call.remove();
+							} else {
+								const first = stringSetFunc.node.body.body[0];
+								if (first.type === 'ReturnStatement' && !first.argument) {
 									call.remove();
-								} else {
-									const first = stringSetFunc.node.body.body[0];
-									if (first.type === 'ReturnStatement' && !first.argument) {
-										call.remove();
-									}
 								}
 							}
 						}
 					}
 				}
-
 			}
 			
-			if (!missed) {
-				binding.path.remove();
-				for (const ref of binding.referencePaths) {
-					const assign = ref.parentPath;
-					if (!assign?.isAssignmentExpression({ operator: '=' }) || ref.key !== 'right') continue;
-					if (!assign.get('left').matchesPattern('module.exports')) continue;
-					
-					let cjsCheck = assign.getStatementParent()?.parentPath;
-					if (cjsCheck?.isBlockStatement()) {
-						cjsCheck = cjsCheck.parentPath;
-					}
-					if (!cjsCheck?.isIfStatement()) continue;
-
-					let exportParent = cjsCheck;
-					while (exportParent.key === 'alternate') {
-						const ancestor = exportParent.parentPath;
-						if (!ancestor.isIfStatement()) break;
-
-						exportParent = ancestor;
-					}
-
-					// TODO: narrow constraint and maybe ensure no other code is run during exporting
-
-					exportParent.remove();
-
-					break;
+			for (const ref of binding.referencePaths) {
+				const assign = ref.parentPath;
+				if (!assign?.isAssignmentExpression({ operator: '=' }) || ref.key !== 'right') continue;
+				if (!assign.get('left').matchesPattern('module.exports')) continue;
+				
+				let cjsCheck = assign.getStatementParent()?.parentPath;
+				if (cjsCheck?.isBlockStatement()) {
+					cjsCheck = cjsCheck.parentPath;
 				}
+				if (!cjsCheck?.isIfStatement()) continue;
+
+				let exportParent = cjsCheck;
+				while (exportParent.key === 'alternate') {
+					const ancestor = exportParent.parentPath;
+					if (!ancestor.isIfStatement()) break;
+
+					exportParent = ancestor;
+				}
+
+				// TODO: narrow constraint and maybe ensure no other code is run during exporting
+
+				exportParent.remove();
+
+				break;
+			}
+
+			if (binding.referencePaths.every(isRemoved)) {
+				binding.path.remove();
 				changed = true;
 			}
 		}

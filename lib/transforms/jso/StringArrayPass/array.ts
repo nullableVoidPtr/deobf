@@ -11,6 +11,8 @@ function evalStringArrayChecked(path: NodePath<t.ArrayExpression>) {
 		strings.push(element.node.value);
 	}
 
+	if (strings.length === 0) return null;
+
 	return strings;
 }
 
@@ -92,6 +94,7 @@ export default function findStringArrayCandidates(treePath: NodePath): Map<Bindi
 			}
 		},
 		ArrayExpression(arrayPath) {
+			// Pre-2.19.0
 			const id = getVarInitId(arrayPath);
 			if (!id) {
 				arrayPath.skip();

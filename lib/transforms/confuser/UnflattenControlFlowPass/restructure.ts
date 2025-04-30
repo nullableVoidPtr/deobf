@@ -2,13 +2,16 @@ import * as t from '@babel/types';
 import { Visitor, type NodePath } from '@babel/traverse';
 import _traverse from '@babel/traverse';
 import { MultiDirectedGraph } from 'graphology';
-import { asSingleStatement, getPropertyName, isUndefined, pathAsBinding } from '../../../utils.js';
+import { asSingleStatement, getParentingCall, getPropertyName, isUndefined, pathAsBinding } from '../../../utils.js';
 import ControlFlowGraph, { CFGAttributes, Edge, NormalizedBlock, reduceSimple } from '../../../control-flow/mod.js';
 import { FlatControlFlow } from './controlFlow.js';
 import FixParametersPass from '../FixParametersPass.js';
 
 // eslint-disable-next-line  @typescript-eslint/no-explicit-any
 const traverse: typeof _traverse = (_traverse as any).default;
+
+import _generate from '@babel/generator';
+void _generate;
 
 interface SuccessorInfo {
 	switchCase: NodePath<t.SwitchCase>;
@@ -388,7 +391,7 @@ class LiftedBlock {
 		}
 
 		const preEpilogue = branch?.getPrevSibling();
-		if (preEpilogue?.isReturnStatement() || branch?.isThrowStatement() ) {
+		if (preEpilogue?.isReturnStatement() || preEpilogue?.isThrowStatement() ) {
 			this.consequent = null;
 			this.alternate = undefined;
 			branch!.remove();
@@ -519,7 +522,8 @@ class LiftedBlock {
 							path.get('right').skip();
 						},
 						ReferencedIdentifier(path) {
-							if (path.getAncestry().some(p => p.parentPath?.isAssignmentPattern() && p.key === 'right')) return;
+							const assignPattern = path.getAncestry().find(p => p.parentPath?.isAssignmentPattern() && p.key === 'right')
+							if (assignPattern && left.isAncestor(assignPattern)) return;
 							if (path.getData('isDeclaration', false)) return;
 
 							state.allDeclarations = false;
@@ -684,8 +688,8 @@ export function outlineCallAsFunc(
 		if (controlFlow.flattenedFunc.node.generator) {
 			const memberExpr = target.parentPath;
 			if (memberExpr.isMemberExpression() && target.key === 'object' && getPropertyName(memberExpr) === 'next') {
-				const nextCall = memberExpr.parentPath;
-				if (nextCall.isCallExpression() && memberExpr.key === 'callee') {
+				const nextCall = getParentingCall(memberExpr);
+				if (nextCall) {
 					const value = nextCall.parentPath;
 					if (value.isMemberExpression() && nextCall.key === 'object' && getPropertyName(memberExpr) === 'value') {
 						target = value;
@@ -904,23 +908,29 @@ export function outlineCallAsFunc(
 		visitedCases.add(caseId);
 	}
 
-	const funcCFG = new ControlFlowGraph(caseCFG);
-	reduceSimple(funcCFG);
-	void funcCFG;
 	const funcBody: t.Statement[] = [];
-	if (funcCFG.order === 1) {
-		const [node] = funcCFG.nodes();
-		funcBody.push(...funcCFG.getNodeAttribute(node, 'beforeStatements'))
-	} else {
-		throw new Error();
+	
+	try {
+		const funcCFG = new ControlFlowGraph(caseCFG);
+		reduceSimple(funcCFG);
+
+		if (funcCFG.order === 1) {
+			const [node] = funcCFG.nodes();
+			funcBody.push(...funcCFG.getNodeAttribute(node, 'beforeStatements'))
+		} else {
+			// throw new Error();
+			return null;
+		}
+	} catch {
+		return null;
 	}
 
 	let target: NodePath<t.Expression> = path;
 	if (controlFlow.flattenedFunc.node.generator) {
 		const memberExpr = target.parentPath;
 		if (memberExpr.isMemberExpression() && target.key === 'object' && getPropertyName(memberExpr) === 'next') {
-			const nextCall = memberExpr.parentPath;
-			if (nextCall.isCallExpression() && memberExpr.key === 'callee') {
+			const nextCall = getParentingCall(memberExpr);
+			if (nextCall) {
 				const value = nextCall.parentPath;
 				if (value.isMemberExpression() && nextCall.key === 'object' && getPropertyName(value) === 'value') {
 					target = value;
@@ -1006,7 +1016,7 @@ export function outlineCallAsFunc(
 		);
 	}
 
-	const last = outlinedFunc.get('body').get('body').at(-1);
+	const last = outlinedFunc.get('body.body').at(-1);
 	if (last?.isReturnStatement()) {
 		const argument = last.get('argument');
 		if (!argument.hasNode() || isUndefined(argument)) {

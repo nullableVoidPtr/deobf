@@ -5,15 +5,16 @@
 	"type": "module",
 	"scripts": {
 		"lint": "eslint src/**/*.ts lib/**/*.ts bin/**/*.ts",
-		"build-web": "esbuild --bundle --outdir=out/web web/index.html web/main.ts --loader:.html=copy --format=esm --inject:src/web_shim.mjs "
+		"build": "tsc",
+		"build-web": "esbuild --bundle --outdir=out/web web/index.html web/main.ts --loader:.html=copy --format=esm --inject:src/web_shim.mjs"
 	},
 	"author": "nullableVoidPtr",
 	"license": "GPL-3.0",
 	"dependencies": {
-		"@babel/generator": "^7.24.6",
-		"@babel/parser": "^7.24.6",
-		"@babel/traverse": "^7.24.6",
-		"@babel/types": "^7.24.6",
+		"@babel/generator": "^7.28.3",
+		"@babel/parser": "^7.28.4",
+		"@babel/traverse": "^7.28.4",
+		"@babel/types": "^7.28.4",
 		"babylon-query": "0.0.9",
 		"base64-arraybuffer": "^1.0.2",
 		"graphology": "^0.26.0",
@@ -21,17 +22,16 @@
 		"yargs": "^17.7.2"
 	},
 	"devDependencies": {
-		"@eslint/eslintrc": "^3.1.0",
-		"@eslint/js": "^9.6.0",
-		"@types/babel__generator": "^7.6.8",
-		"@types/babel__traverse": "^7.20.6",
+		"@eslint/js": "^9.35.0",
+		"@types/babel__generator": "^7.27.0",
+		"@types/babel__traverse": "^7.28.0",
 		"@types/eslint__js": "^8.42.3",
-		"@types/node": "^20.14.2",
-		"@types/yargs": "^17.0.32",
-		"esbuild": "^0.21.4",
-		"eslint": "^9.4.0",
-		"graphology-types": "^0.24.7",
-		"typescript": "^5.4.5",
-		"typescript-eslint": "^7.15.0"
+		"@types/node": "^20.19.13",
+		"@types/yargs": "^17.0.33",
+		"esbuild": "^0.21.5",
+		"eslint": "^9.35.0",
+		"graphology-types": "^0.24.8",
+		"typescript": "^5.9.2",
+		"typescript-eslint": "^8.43.0"
 	}
 }

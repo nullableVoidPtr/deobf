@@ -25,7 +25,7 @@ export default (path: NodePath): boolean => {
 
 				const innerFunc = expr.get('right');
 				if (innerFunc.isFunctionExpression()) {
-					if (innerFunc.get('body').get('body').length !== 0) return;
+					if (innerFunc.get('body.body').length !== 0) return;
 				} else if (innerFunc.isArrowFunctionExpression()) {
 					if (!innerFunc.get('body').isPure()) return;
 				} else {

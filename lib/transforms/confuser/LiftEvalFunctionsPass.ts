@@ -2,7 +2,7 @@ import * as t from '@babel/types';
 import { Binding, type NodePath } from '@babel/traverse';
 import { parse } from '@babel/parser';
 import _traverse from '@babel/traverse';
-import { asSingleStatement, getPropertyName, pathAsBinding } from '../../utils.js';
+import { asSingleStatement, getParentingCall, getPropertyName, pathAsBinding } from '../../utils.js';
 import * as DeadCodeRemovalPass from './DeadCodeRemovalPass.js';
 import * as BlockStatementPass from '../BlockStatementPass.js';
 import TargetComposer from '../../targets/TargetComposer.js';
@@ -68,7 +68,7 @@ function liftRuntimeFunc(body: NodePath<t.Statement>[]): t.FunctionExpression | 
 		func.node.async,
 	);
 
-	const funcBody = filterBody(func.get('body').get('body'));
+	const funcBody = filterBody(func.get('body.body'));
 	if (func.node.params.length === 0) {
 		const argsDecn = funcBody.at(0);
 		if (!argsDecn?.isVariableDeclaration()) return liftedFunc;
@@ -137,6 +137,7 @@ function liftRuntimeFunc(body: NodePath<t.Statement>[]): t.FunctionExpression | 
 	);
 }
 
+
 export default (path: NodePath): boolean => {
 	let changed = false;
 
@@ -156,9 +157,7 @@ export default (path: NodePath): boolean => {
 			if (!ret?.isReturnStatement() || !ret.get('argument').isIdentifier({ name: boolParam.node.name })) return;
 
 			const binding = pathAsBinding(dummyFunc);
-			if (!binding) return;
-
-			if (!binding.constant) return;
+			if (!binding?.constant) return;
 
 			let missed = false;
 			for (const ref of binding.referencePaths) {
@@ -181,6 +180,7 @@ export default (path: NodePath): boolean => {
 				}
 
 				call.replaceWith(value);
+				changed = true;
 				
 				const usage = call.parentPath;
 				if (usage.isVariableDeclarator()) {
@@ -197,6 +197,95 @@ export default (path: NodePath): boolean => {
 
 			if (!missed) {
 				dummyFunc.remove();
+				changed = true;
+			}
+		},
+		CallExpression(call) {
+			if (!call.get('callee').isIdentifier({ name: 'eval' })) return;
+
+			const code = call.get('arguments.0');
+			if (!code.isStringLiteral()) return;
+
+			let predicateId;
+			try {
+				const parsed = parse(code.node.value);
+				if (parsed.program.body.length !== 1) return;
+
+				const stmt = parsed.program.body[0];
+				if (!t.isExpressionStatement(stmt)) return;
+				const assign = stmt.expression;
+				if (!t.isAssignmentExpression(assign, { operator: '=' })) return;
+				if (!t.isBooleanLiteral(assign.right, { value: true })) return;
+
+				if (!t.isIdentifier(assign.left)) return;
+
+				predicateId = assign.left.name;
+			} catch {
+				return;
+			}
+
+			const binding = call.scope.getBinding(predicateId);
+			if (!binding) return;
+
+			if (binding.references !== 1) return;
+			// TODO(priority): capture countermeasure, more robust
+
+			const func = call.getFunctionParent();
+			if (!func?.isFunctionDeclaration()) return;
+			const funcBinding = pathAsBinding(func);
+			if (!funcBinding) return;
+			
+			const state = { trueReturn: false };
+			func.traverse({
+				ReturnStatement(retStmt) {
+					const value = retStmt.get('argument');
+					if (!value.isIdentifier()) return;
+					this.trueReturn = true;
+					path.stop();
+				},
+				Function(path) {
+					path.skip();
+				}
+			}, state);
+
+			let missed = false;
+			for (const ref of funcBinding.referencePaths) {
+				const call = ref.parentPath;
+				if (!call?.isCallExpression()) {
+					missed = true;
+					continue;
+				}
+
+				let value: t.Expression = t.booleanLiteral(true);
+				const args = call.get('arguments');
+				if (args.length > 0) {
+					const arg = args[0];
+					if (!arg.isExpression()) {
+						missed = true;
+						continue;
+					}
+
+					value = arg.node;
+				}
+
+				call.replaceWith(value);
+				changed = true;
+				
+				const usage = call.parentPath;
+				if (usage.isVariableDeclarator()) {
+					const usageBinding = pathAsBinding(usage);
+					if (!usageBinding?.constant) continue;
+
+					for (const ref of usageBinding.referencePaths) {
+						ref.replaceWith(value);
+					}
+
+					usage.remove();
+				}
+			}
+
+			if (!missed) {
+				func.remove();
 				changed = true;
 			}
 		}
@@ -318,8 +407,8 @@ export default (path: NodePath): boolean => {
 			if (!apply?.isMemberExpression() || memberExpr.key !== 'object') continue;
 			if (getPropertyName(apply) !== 'apply') continue;
 
-			const call = apply.parentPath;
-			if (!call.isCallExpression() || apply.key !== 'callee') continue;
+			const call = getParentingCall(apply);
+			if (!call) continue;
 			const applyArgs = call.get('arguments');
 			if (applyArgs.length !== 2) continue;
 			if (!applyArgs[0].isThisExpression()) continue;
@@ -354,7 +443,7 @@ export default (path: NodePath): boolean => {
 					arrayRef.replaceWith(t.identifier(arrayBinding.identifier.name));
 				}
 			} else {
-				block.node.body.unshift(
+				block.unshiftContainer('body',
 					t.variableDeclaration(
 						'var',
 						[t.variableDeclarator(arrayRef.node, t.identifier(arrayBinding.identifier.name))]

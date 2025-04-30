@@ -1,10 +1,11 @@
 import * as t from '@babel/types';
 import { type Binding, type NodePath } from '@babel/traverse';
-import { dereferencePathFromBinding } from '../../../utils.js';
+import { dereferencePathFromBinding, getParentingCall } from '../../../utils.js';
 import findStringArrayCandidates from './array.js';
 import findDecoders, { DecoderInfo } from './decoder.js';
 import resolveWrappers from './wrapper.js';
 import analyseRotators from './rotator.js';
+import { fixCFStorage } from './storage.js';
 
 function removeDecoders(decoders: Map<Binding, DecoderInfo>) {
 	for (const [binding, { arrayBinding }] of decoders) {
@@ -29,22 +30,22 @@ function removeDecoders(decoders: Map<Binding, DecoderInfo>) {
 function replaceDecoderCalls(decoders: Map<Binding, DecoderInfo>) {
 	for (const [decoderBinding, { decoder }] of decoders) {
 		for (const decoderRef of decoderBinding.referencePaths) {
-			if (decoderRef.key !== 'callee') continue;
+			const callPath = getParentingCall(decoderRef);
+			if (!callPath) continue;
 
-			const callPath = decoderRef.parentPath;
-			if (!callPath?.isCallExpression()) continue;
+			fixCFStorage(callPath);
 
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const args: any[] = [];
+			const literalArgs: any[] = [];
 			for (const literal of callPath.get('arguments')) {
 				const state = literal.evaluate();
 				if (state.confident) {
-					args.push(state.value);
+					literalArgs.push(state.value);
 				} else {
 					throw new Error('unexpected arg in call to decoder');
 				}
 			}
-			callPath.replaceWith(t.stringLiteral(decoder(...args)));
+			callPath.replaceWith(t.stringLiteral(decoder(...literalArgs)));
 		}
 	}
 }

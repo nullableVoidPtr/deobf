@@ -1,5 +1,6 @@
 import * as t from '@babel/types';
 import _traverse, { type Binding, type NodePath } from '@babel/traverse';
+import { filterBody } from './transforms/confuser/utils.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const traverse: typeof _traverse = (<any>_traverse).default;
@@ -13,11 +14,12 @@ export function isUndefined(path: NodePath<t.Node | null | undefined>) {
 	return false;
 }
 
-export function asSingleStatement(path: NodePath<t.Node | null | undefined>) {
+export function asSingleStatement(path: NodePath<t.Node | null | undefined>, filter = false) {
 	if (!path.isStatement()) return null;
 	if (!path.isBlockStatement()) return path;
 
-	const body = path.get('body');
+	let body = path.get('body');
+	if (filter) body = filterBody(body);
 	const stmt = body.at(0);
 	if (stmt?.isReturnStatement()) {
 		return stmt;
@@ -100,13 +102,69 @@ export function getPropertyName(path: NodePath) {
 	return null;
 }
 
+export function isLooselyConstantBinding(binding: Binding | undefined | null): binding is Binding {
+	if (!binding) return false;
+	if (binding.constant) return true;
+	if (binding.kind === 'var' && binding.constantViolations.length === 1) return true;
+
+	return false;
+}
+
 export function isRemoved(path: NodePath): boolean {
 	return path.find(
 		ancestor => ancestor.removed || !ancestor.hasNode()
 	) !== null;
 }
 
+export function getParentingCall(callee: NodePath): NodePath<t.CallExpression> | null {
+	const call = callee.parentPath;
+	if (!call?.isCallExpression()) return null;
+	if (callee.key !== 'callee') return null;
 
+	return call;
+}
+
+export function getParentingCallLike(callee: NodePath): NodePath<t.CallExpression | t.NewExpression> | null {
+	const call = callee.parentPath;
+	if (!call?.isCallExpression() && !call?.isNewExpression()) return null;
+	if (callee.key !== 'callee') return null;
+
+	return call;
+}
+
+export function* getCallSites(binding: Binding): Generator<{
+	call: NodePath<t.CallExpression>,
+	ref: NodePath,
+}> {
+	for (const ref of [...binding.referencePaths]) {
+		if (isRemoved(ref)) {
+			dereferencePathFromBinding(binding, ref);
+			continue;
+		}
+
+		const call = getParentingCall(ref);
+		if (!call) continue;
+
+		yield {call, ref};
+	}
+}
+
+export function* getCallLikeSites(binding: Binding): Generator<{
+	call: NodePath<t.CallExpression | t.NewExpression>,
+	ref: NodePath,
+}> {
+	for (const ref of [...binding.referencePaths]) {
+		if (isRemoved(ref)) {
+			dereferencePathFromBinding(binding, ref);
+			continue;
+		}
+
+		const call = getParentingCallLike(ref);
+		if (!call) continue;
+
+		yield {call, ref};
+	}
+}
 
 export function inlineProxyCall(
 	callExpr: NodePath<t.CallExpression>,
@@ -114,13 +172,16 @@ export function inlineProxyCall(
 	args: NodePath<t.Expression>[]
 ) {
 	const params = proxyFunc.get('params');
-	if (!params.every((p): p is NodePath<t.Identifier> => p.isIdentifier())) {
-		throw new Error('unsupported func args');
-	}
 	const argMap = new Map<string, t.Expression>();
-	(<NodePath<t.Identifier>[]>params).forEach((param, i) => {
-		argMap.set(param.node.name, args[i].node);
-	});
+	for (let i = 0; i < params.length; i++) {
+		const param = params[i];
+		if (!param.isIdentifier()) {
+			throw new Error('unsupported func args');
+		}
+
+		const value = (i < args.length) ? args[i].node : t.buildUndefinedNode();
+		argMap.set(param.node.name, value);
+	}
 	let returnExp: t.Expression;
 	const body = proxyFunc.get('body');
 	if (body.isBlockStatement()) {
@@ -161,6 +222,18 @@ export function inlineProxyCall(
 	});
 
 	callExpr.replaceWith(returnExp);
+}
+
+export function removeIIFE(iife: NodePath) {
+	const iifeParent = iife.parentPath;
+	if (iifeParent?.isUnaryExpression({ operator: '!' })) {
+		if (iifeParent.parentPath.isStatement()) {
+			iifeParent.parentPath.remove();
+			return;
+		}
+	}
+
+	iife.remove();
 }
 
 export class Stack<T> {

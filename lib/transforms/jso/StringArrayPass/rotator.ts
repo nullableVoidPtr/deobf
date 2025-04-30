@@ -1,8 +1,9 @@
 import * as t from '@babel/types';
 import * as bq from 'babylon-query';
 import _traverse, { type Binding, type NodePath } from '@babel/traverse';
-import { dereferencePathFromBinding } from '../../../utils.js';
+import { dereferencePathFromBinding, pathAsBinding, removeIIFE } from '../../../utils.js';
 import { DecoderInfo } from './decoder.js';
+import { fixCFStorage } from './storage.js';
 
 // eslint-disable-next-line  @typescript-eslint/no-explicit-any
 const traverse: typeof _traverse = (_traverse as any).default;
@@ -42,6 +43,34 @@ function isRotatePredicate(expression: NodePath<t.Expression>): boolean {
 	);
 
 	return parseIntMatch;
+}
+
+function asRotatePredicate(node: NodePath): NodePath<t.Expression> | null {
+	const resolved = node.resolve();
+	if (resolved.isExpression() && !resolved.isPure() && isRotatePredicate(resolved)) {
+		return resolved;
+	}
+
+	if (node.isIdentifier()) {
+		const binding = pathAsBinding(node);
+		if (!binding) return null;
+
+		if (!binding.constant) {
+			if (binding.kind !== 'var') return null;
+			if (binding.constantViolations.length !== 1) return null;
+			if (binding.referencePaths.length !== 1) return null;
+
+			const assign = binding.constantViolations[0];
+			if (!assign.isVariableDeclarator()) return null;
+
+			const init = assign.get('init');
+			if (init.hasNode() && !init.isPure() && isRotatePredicate(init)) {
+				return init;
+			}
+		}
+	}
+
+	return null;
 }
 
 function evalRotatePredicate(node: t.Expression): number {
@@ -102,36 +131,70 @@ export default function analyseRotators(decoders: Map<Binding, DecoderInfo>) {
 
 		const rotatorIifePath = arrayArgRef?.parentPath;
 		if (!rotatorIifePath?.isCallExpression()) continue;
-
-		const args = rotatorIifePath.get('arguments');
-		if (args.length !== 2) continue;
-		if (!args[1].isNumericLiteral()) continue;
-
-		const expectedValueArg = args[1];
-		const state: {
-			rotatePredicate?: NodePath<t.Expression>;
-		} = {};
 		if (fixSimpleRotator(rotatorIifePath, decoderInfo)) {
+			// Pre-2.10.0
 			rotatorIifePath.remove();
 			dereferencePathFromBinding(arrayBinding, arrayArgRef);
 			continue;
 		}
 
+		const state: {
+			rotatePredicate?: NodePath<t.Expression>;
+			expectedValue?: number;
+		} = {};
 		rotatorIifePath.traverse({
-			VariableDeclarator(varPath) {
-				const init = varPath.get('init');
-				if (!init.isExpression()) return;
-				if (!isRotatePredicate(init)) return;
+			IfStatement(ifStmt) {
+				// Handle edge cases where the expected value is inlined from the param due to minifier
+				const test = ifStmt.get('test');
+				if (!test.isBinaryExpression({ operator: '===' })) return;
 
-				this.rotatePredicate = init;
-				varPath.stop();
+				const left = test.get('left');
+				const right = test.get('right');
+
+				let expectedValueExpr;
+				const leftPredicate = asRotatePredicate(left);
+				if (leftPredicate) {
+					this.rotatePredicate = leftPredicate;
+					expectedValueExpr = right;
+				} else {
+					const rightPredicate = asRotatePredicate(right);
+					if (!rightPredicate) return;
+
+					this.rotatePredicate = rightPredicate;
+					expectedValueExpr = left;
+				}
+
+				const expectedEval = expectedValueExpr.evaluate();
+				if (expectedEval.confident) {
+					this.expectedValue = expectedEval.value;
+					ifStmt.stop();
+					return;
+				}
+
+				if (!expectedValueExpr.isIdentifier()) return;
+				const expectedBinding = pathAsBinding(expectedValueExpr);
+				if (expectedBinding?.kind !== 'param') return;
+
+				const argIndex = expectedBinding.path.key;
+				if (typeof argIndex !== 'number') return;
+				const expectedValueArg = rotatorIifePath.get('arguments')[argIndex];
+
+				const expectedArgEval = expectedValueArg?.evaluate();
+				if (expectedArgEval?.confident) {
+					this.expectedValue = expectedArgEval.value;
+					ifStmt.stop();
+					return;
+				}
 			},
 		}, state);
 
-		const { rotatePredicate } = state;
-		if (!rotatePredicate) {
+		const { expectedValue, rotatePredicate } = state;
+		if (!rotatePredicate || expectedValue === undefined) {
 			throw Error('Cannot find validator expression');
 		}
+
+		rotatePredicate.scope.crawl();
+		fixCFStorage(rotatePredicate);
 
 		const curriedIntCalls = new Map<NodePath, (() => number)>();
 		rotatePredicate.traverse({
@@ -203,7 +266,6 @@ export default function analyseRotators(decoders: Map<Binding, DecoderInfo>) {
 				continue;
 			}
 
-			const expectedValue = expectedValueArg.node.value;
 			if (evalRotatePredicate(rotatePredicate.node) !== expectedValue) {
 				decoderInfo.data.splice(0, arrayLength, ...sourceArray);
 				continue;
@@ -217,7 +279,8 @@ export default function analyseRotators(decoders: Map<Binding, DecoderInfo>) {
 			}
 
 			dereferencePathFromBinding(arrayBinding, arrayArgRef);
-			rotatorIifePath.remove();
+
+			removeIIFE(rotatorIifePath);
 			break;
 		}
 	}

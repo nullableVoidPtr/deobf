@@ -134,7 +134,7 @@ export default (path: NodePath): boolean => {
 			let flatControlFlow;
 			try {
 				flatControlFlow = new FlatControlFlow(flattenedFunc, binding);
-			} catch (e) {
+			} catch (_) {
 				return;
 			}
 
@@ -162,7 +162,7 @@ export default (path: NodePath): boolean => {
 				const result = restructureCallAsFunc(flatControlFlow, call, {
 					inlineTarget: call,
 				});
-				if (!result) throw new Error();
+				if (!result) continue; // throw new Error();
 				
 				const {outlinedFunc, call: newCall, functionScopePredicates: programScopePredicates} = result;
 
@@ -245,7 +245,7 @@ export default (path: NodePath): boolean => {
 
 					changed = true;
 				} else if (externalCalls.length === 1) {
-					const last = outlinedFunc.get('body').get('body').at(-1);
+					const last = outlinedFunc.get('body.body').at(-1);
 					if (last?.isReturnStatement()) {
 						const argument = last.get('argument');
 						if (argument.hasNode()) {

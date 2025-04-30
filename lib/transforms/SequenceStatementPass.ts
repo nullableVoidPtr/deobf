@@ -145,7 +145,7 @@ export default (path: NodePath): boolean => {
 			) {
 				const body = (<NodePath<t.ForStatement | t.DoWhileStatement>>parentPath).get('body');
 				if (body.isBlockStatement()) {
-					body.node.body.push(...newStatements);
+					body.pushContainer('body', newStatements);
 				} else {
 					body.replaceWith(
 						t.blockStatement([body.node, ...newStatements])
@@ -167,20 +167,34 @@ export default (path: NodePath): boolean => {
 				ancestor = ancestor.parentPath;
 			}
 
-			if (!ancestor.isStatement()) {
+			if (ancestor.isVariableDeclarator()) {
+				if (ancestor.key !== 0) {
+					return;
+				}
+
+				current = ancestor;
+				ancestor = ancestor.parentPath;
+
+				if (!ancestor.isVariableDeclaration() || current.listKey !== 'declarations') {
+					// throw new Error();
+					return;
+				}
+			} else if (ancestor.isStatement()) {
+				if (STATEMENTS?.[ancestor.type] !== current.key) {
+					return;
+				}
+			} else {
 				throw new Error();
 			}
 
-			if (STATEMENTS?.[ancestor.type] === current.key) {
-				ancestor.insertBefore(newStatements);
-				path.replaceWith(isIndirectEval
-					? t.sequenceExpression([
-						t.numericLiteral(0),
-						lastExpressionNode
-					])
-					: lastExpressionNode
-				);
-			}
+			ancestor.insertBefore(newStatements);
+			path.replaceWith(isIndirectEval
+				? t.sequenceExpression([
+					t.numericLiteral(0),
+					lastExpressionNode
+				])
+				: lastExpressionNode
+			);
 		},
 		// ensure binding references are updated
 		Scopable: {

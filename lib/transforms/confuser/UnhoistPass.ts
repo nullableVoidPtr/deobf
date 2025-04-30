@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
 import { Binding, type NodePath } from '@babel/traverse';
-import { pathAsBinding } from '../../utils.js';
+import { getCallLikeSites, pathAsBinding } from '../../utils.js';
 import { extractHoistedDecl } from './utils.js';
 
 function getAssignedIdentifiers(pattern: NodePath<t.Pattern>): Set<string> {
@@ -51,7 +51,7 @@ function getAssignedIdentifiers(pattern: NodePath<t.Pattern>): Set<string> {
 export function unhoistFunctionParams(func: NodePath<t.FunctionDeclaration | t.FunctionExpression>, funcLength: number) {
 	const extraParams = func.get('params').slice(funcLength);
 
-	const body = func.get('body').get('body');
+	const body = func.get('body.body');
 	for (const stmt of body) {
 		const hoist = extractHoistedDecl(stmt);
 		if (!hoist) return;
@@ -93,11 +93,8 @@ export default (path: NodePath): boolean => {
 			if (!binding?.constant) return;
 
 			let maxArgLength = -1;
-			for (const ref of binding.referencePaths) {
-				const call = ref.parentPath;
-				if (!(call?.isCallExpression() || call?.isNewExpression()) || ref.key !== 'callee') return;
-
-				const args = (<NodePath<t.CallExpression | t.NewExpression>>call).get('arguments');
+			for (const { call } of getCallLikeSites(binding)) {
+				const args = call.get('arguments');
 				if (args.some(a => a.isSpreadElement())) return;
 				if (maxArgLength < args.length) {
 					maxArgLength = args.length;

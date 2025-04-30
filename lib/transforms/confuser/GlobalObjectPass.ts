@@ -1,6 +1,7 @@
 import * as t from '@babel/types';
 import { type Binding, type NodePath } from '@babel/traverse';
-import { asSingleStatement, getPropertyName, pathAsBinding } from '../../utils.js';
+import { asSingleStatement, dereferencePathFromBinding, getCallSites, getPropertyName, isRemoved, pathAsBinding } from '../../utils.js';
+import { parse } from '@babel/parser';
 
 function inlineFunction(concealFunction: NodePath<t.FunctionDeclaration>, objId: string) {
 	const switchStmt = asSingleStatement(concealFunction.get('body'));
@@ -27,36 +28,21 @@ function inlineFunction(concealFunction: NodePath<t.FunctionDeclaration>, objId:
 		concealMapping.set(discriminant.node.value, property.node);
 	}
 
-	let missed = false;
-	for (const ref of concealBinding.referencePaths) {
-		const call = ref.parentPath;
-		if (!call?.isCallExpression() || ref.key !== 'callee') {
-			missed = true;
-			continue;
-		}
-
+	for (const {call, ref} of getCallSites(concealBinding)) {
 		const args = call.get('arguments');
-		if (args.length < 1) {
-			missed = true;
-			continue;
-		}
+		if (args.length < 1) continue;
 
 		const str = args[0];
-		if (!str.isStringLiteral()) {
-			missed = true;
-			continue;
-		}
+		if (!str.isStringLiteral()) continue;
 
 		const object = concealMapping.get(str.node.value);
-		if (!object) {
-			missed = true;
-			continue;
-		}
+		if (!object) continue;
 
 		call.replaceWith(t.cloneNode(object, true));
+		dereferencePathFromBinding(concealBinding, ref);
 	}
 
-	if (!missed) {
+	if (concealBinding.referencePaths.every(isRemoved)) {
 		concealFunction.remove();
 	}
 }
@@ -122,6 +108,65 @@ export default (path: NodePath): boolean => {
 
 			const binding = pathAsBinding(func);
 			if (binding) this.globalObjFuncs.add(binding);
+		},
+		// TODO: extract into its own pass
+		CallExpression(call) {
+			if (!call.get('callee').isIdentifier({ name: 'eval' })) return;
+
+			const code = call.get('arguments.0');
+			if (!code.isStringLiteral()) return;
+
+			let predicateId;
+			try {
+				const parsed = parse(code.node.value);
+				if (parsed.program.body.length !== 1) return;
+
+				const stmt = parsed.program.body[0];
+				if (!t.isExpressionStatement(stmt)) return;
+				const assign = stmt.expression;
+				if (!t.isAssignmentExpression(assign, { operator: '=' })) return;
+				if (!t.isBooleanLiteral(assign.right, { value: true })) return;
+
+				if (!t.isIdentifier(assign.left)) return;
+
+				predicateId = assign.left.name;
+			} catch {
+				return;
+			}
+
+			const binding = call.scope.getBinding(predicateId);
+			if (!binding) return;
+
+			if (binding.references !== 1) return;
+			// TODO(priority): capture countermeasure
+
+			const func = call.getFunctionParent();
+			if (!func?.isFunctionDeclaration()) return;
+			const funcBinding = pathAsBinding(func);
+			if (!funcBinding) return;
+			
+			const state = { thisReturn: false };
+			func.traverse({
+				ReturnStatement(retStmt) {
+					const value = retStmt.get('argument');
+					if (!value.isIdentifier()) return;
+
+					const resolved = value.resolve();
+					if (!resolved.isCallExpression()) return;
+					if (!resolved.get('callee').isIdentifier({ name: 'eval' })) return;
+
+					const toEval = resolved.get('arguments.0');
+					if (!toEval.isStringLiteral({ value: 'this' })) return;
+
+					this.thisReturn = true;
+					path.stop();
+				},
+				Function(path) {
+					path.skip();
+				}
+			}, state);
+
+			if (state.thisReturn) this.globalObjFuncs.add(funcBinding);
 		}
 	}, state);
 

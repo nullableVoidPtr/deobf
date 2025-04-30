@@ -14,3 +14,6 @@ export * as DeadCodeRemovalPass from './DeadCodeRemovalPass.js';
 export * as OutlineDispatchPass from './OutlineDispatchPass.js';
 export * as LiftEvalFunctionsPass from './LiftEvalFunctionsPass.js';
 export * as UnflattenFunctionPass from './UnflattenFunctionPass.js';
+export * as FunctionHashPass from './FunctionHashPass.js';
+export * as LockRemovalPass from './LockRemovalPass.js';
+export * as PolyfillRemovalPass from './PolyfillRemovalPass.js';

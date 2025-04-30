@@ -273,18 +273,49 @@ function reduceSimpleIf(graph: ControlFlowGraph) {
 		let alternate: string | null;
 		let successor: string | null;
 
-		const leftConsequent = leftSuccessors[0] === right;
-		const rightConsequent = rightSuccessors[0] === left;
-		const ifElse = leftSuccessors[0] === rightSuccessors[0];
+		const containedLeft = graph.inNeighbors(left).length === 1;
+		const containedRight = graph.inNeighbors(right).length === 1;
 
-		if (leftConsequent) {
-			if (graph.inNeighbors(left).length !== 1) {
-				return acc;
-			}
-			if (leftSuccessors.length !== 1) {
-				return acc;
-			}
+		const leftConsequent = (
+			leftSuccessors.length === 1 &&
+			leftSuccessors[0] === right &&
+			containedLeft
+		);
+		const rightConsequent = (
+			rightSuccessors.length === 1 &&
+			rightSuccessors[0] === left &&
+			containedRight
+		);
+		const ifElse = (
+			leftSuccessors.length === 1 &&
+			rightSuccessors.length === 1 &&
+			leftSuccessors[0] === rightSuccessors[0] &&
+			containedLeft &&
+			containedRight
+		);
 
+		const leftEarlyReturn = (
+			leftSuccessors.length === 0 &&
+			containedLeft
+		);
+		const rightEarlyReturn = (
+			rightSuccessors.length === 0 &&
+			containedRight
+		);
+		const bothEarlyReturn = leftEarlyReturn && rightEarlyReturn;
+
+		if (ifElse || bothEarlyReturn) {
+			ifTest = test;
+			successor = leftSuccessors[0] ?? null;
+
+			if (truthyBranch === left) {
+				consequent = left;
+				alternate  = right;
+			} else {
+				consequent = right;
+				alternate  = left;
+			}
+		} else if (leftConsequent || leftEarlyReturn) {
 			if (truthyBranch === left) {
 				ifTest = test
 			} else  {
@@ -294,14 +325,7 @@ function reduceSimpleIf(graph: ControlFlowGraph) {
 			consequent = left;
 			alternate = null;
 			successor = right;
-		} else if (rightConsequent) {
-			if (graph.inNeighbors(right).length !== 1) {
-				return acc;
-			}
-			if (rightSuccessors.length !== 1) {
-				return acc;
-			}
-
+		} else if (rightConsequent || rightEarlyReturn) {
 			if (truthyBranch === right) {
 				ifTest = test
 			} else {
@@ -311,48 +335,6 @@ function reduceSimpleIf(graph: ControlFlowGraph) {
 			consequent = right;
 			alternate = null;
 			successor = left;
-		} else if (leftSuccessors.length === 0 && rightSuccessors.length === 0) {
-			if (graph.inNeighbors(left).length !== 1) {
-				return acc;
-			}
-			if (graph.inNeighbors(right).length !== 1) {
-				return acc;
-			}
-
-			ifTest = test;
-			successor = null;
-
-			if (truthyBranch === left) {
-				consequent = left;
-				alternate  = right;
-			} else {
-				consequent = right;
-				alternate  = left;
-			}
-		} else if (ifElse) {
-			if (graph.inNeighbors(left).length !== 1) {
-				return acc;
-			}
-			if (graph.inNeighbors(right).length !== 1) {
-				return acc;
-			}
-			if (leftSuccessors.length !== 1) {
-				return acc;
-			}
-			if (rightSuccessors.length !== 1) {
-				return acc;
-			}
-
-			ifTest = test;
-			[successor] = leftSuccessors;
-
-			if (truthyBranch === left) {
-				consequent = left;
-				alternate  = right;
-			} else {
-				consequent = right;
-				alternate  = left;
-			}
 		} else {
 			return acc;
 		}

@@ -1,7 +1,6 @@
 import { parse } from '@babel/parser';
 import * as t from '@babel/types';
-import _traverse from '@babel/traverse';
-import { type NodePath } from '@babel/traverse';
+import _traverse, { type NodePath } from '@babel/traverse';
 import _generate from '@babel/generator';
 import { readFileSync, writeFileSync } from 'node:fs';
 import yargs from 'yargs';
@@ -17,8 +16,9 @@ export default (target: Target, description: string) => {
 		.usage('$0 <source> [destination]', description ?? 'deobfuscate a file')
 		.parseSync();
 
-	const tree = parse(readFileSync(argv.source as string, 'utf8'));
-	const state: { path: NodePath<t.Program> | null } = { path: null }
+	const code = readFileSync(argv.source as string, 'utf8');
+	const tree = parse(code);
+	const state: { path: NodePath<t.Program> | null } = { path: null };
 	traverse(tree, {
 		Program(path: NodePath<t.Program>) {
 			this.path = path;
@@ -29,6 +29,14 @@ export default (target: Target, description: string) => {
 	if (!state.path) {
 		throw new Error('could not initialise node path')
 	}
+
+	state.path.hub = {
+		getCode: () => code,
+		getScope: () => state.path?.scope,
+		addHelper: () => { throw new Error(); },
+		buildError: () => { throw new Error(); },
+	};
+
 	target.deobfuscate(state.path);
 
 	const deobfuscatedSource = generate(
