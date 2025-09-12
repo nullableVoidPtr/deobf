@@ -40,6 +40,26 @@ const debugProtSelector = bq.parse(`ReturnStatement
         > Identifier.property[name='constructor']
     )
     > StringLiteral.arguments.0[value='while (true) {}']`);
+const debugTestSelector = bq.parse(`
+	LogicalExpression:has(
+		> BinaryExpression[operator='!==']:has(
+		 	MemberExpression:has(
+				> BinaryExpression.object[operator="+"]
+				> BinaryExpression[operator="/"]
+			):has(
+				> Identifier.property[name='length']
+			)
+		):has(
+			> NumericLiteral[value=1]
+		)
+	):has(
+		> BinaryExpression[operator='===']:has(
+			> BinaryExpression[operator='%']
+			> NumericLiteral[value=20].right
+		):has(
+			> NumericLiteral[value=0]
+		)
+	)`);
 const debugCallSelector = bq.parse(`CallExpression
     > FunctionExpression
     CallExpression:has(
@@ -183,8 +203,37 @@ export default (treePath: NodePath): boolean => {
 			if (body.length !== 2) return;
 
 			const innerFunc = body[0];
-			const matches = bq.query(innerFunc, debugProtSelector);
-			if (matches.length !== 1) return;
+			const protMatches = bq.query(innerFunc, debugProtSelector);
+			if (protMatches.length !== 1) {
+				// Fallback on ugly test check if in the case of a no-eval target.
+				const testMatches = bq.query(innerFunc, debugTestSelector);
+				if (testMatches.length !== 1) return;
+
+				const test = testMatches[0];
+				const identifiers = bq.query(test, 'Identifier[name!="length"]') as NodePath<t.Identifier>[];
+				if (identifiers.length === 0) return;
+				const uniqueIdentifiers = new Set(identifiers.map(id => id.node.name));
+				if (uniqueIdentifiers.size !== 1) return;
+
+				const ifStmt = test.parentPath;
+				if (!ifStmt?.isIfStatement() || test.key !== 'test') return;
+
+				const consequent = ifStmt.get('consequent');
+				if (consequent.isBlockStatement()) {
+					if (!consequent.get('body').some(s => s.isDebuggerStatement())) return;
+				} else if (!consequent.isDebuggerStatement()) {
+					return;
+				}
+
+				const alternate = ifStmt.get('alternate');
+				if (alternate) {
+					if (consequent.isBlockStatement()) {
+						if (!consequent.get('body').some(s => s.isDebuggerStatement())) return;
+					} else if (!consequent.isDebuggerStatement()) {
+						return;
+					}
+				}
+			}
 
 			const binding = pathAsBinding(path);
 			if (binding) {

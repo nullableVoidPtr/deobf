@@ -5,6 +5,16 @@ export const repeatUntilStable = true;
 
 function isPureExpression(path: NodePath<t.Expression>): boolean {
 	if (path.isLiteral()) {
+		if (path.isTemplateLiteral()) {
+			for (const expr of path.get('expressions')) {
+				if (!expr.isExpression()) {
+					return false;
+				}
+				if (!isPureExpression(expr)) {
+					return false;
+				}
+			}
+		}
 		// Base case
 		return true;
 	} else if (path.isArrayExpression()) {
@@ -77,7 +87,7 @@ export default (path: NodePath): boolean => {
 	const evaluatable: NodePath[] = [];
 	path.traverse({
 		Expression(path) {
-			if (path.isLiteral()) return;
+			if (path.isLiteral() && !path.isTemplateLiteral()) return;
 			if (path.isObjectExpression()) return;
 			if (path.isArrayExpression()) return;
 			if (
@@ -88,10 +98,13 @@ export default (path: NodePath): boolean => {
 				return;
 			if (
 				path.isBinaryExpression({ operator: '/' }) &&
-				path.get('left').isNumericLiteral({ value: 1 }) && 
 				path.get('right').isNumericLiteral({ value: 0 })
-			)
-				return;
+			) {
+				const left = path.get('left');
+				if (left.isNumericLiteral() && [0, 1].includes(left.node.value)) {
+					return;
+				}
+			}
 
 			if (isPureExpression(path)) {
 				evaluatable.push(path);
