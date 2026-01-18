@@ -1,6 +1,7 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
 import * as bq from 'babylon-query';
+import globalLogger, { getPassName } from '../../logging.js';
 import { pathAsBinding } from '../../utils.js';
 
 const innerFuncSelector = bq.parse(
@@ -133,6 +134,11 @@ function findDomainLock(path: NodePath): string[] | null {
 
 export default (treePath: NodePath): boolean => {
 	let changed = false;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
 
 	treePath.traverse({
 		VariableDeclarator(varPath) {
@@ -272,6 +278,8 @@ export default (treePath: NodePath): boolean => {
 		iife.remove();
 		changed = true;
 	}
+
+	logger.info('Done' + (changed ? ' with changes' : ''));
 
 	return changed;
 }

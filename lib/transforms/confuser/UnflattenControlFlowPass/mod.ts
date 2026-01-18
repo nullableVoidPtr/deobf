@@ -1,10 +1,11 @@
 import { type NodePath } from '@babel/traverse';
 import _traverse from '@babel/traverse';
+import { blockStatement, expressionStatement, Statement } from '@babel/types';
+import globalLogger, { getPassName } from '../../../logging.js';
 import { filterBody, extractHoistedDecl } from '../utils.js';
 import { asSingleStatement, dereferencePathFromBinding, getPropertyName, isUndefined, pathAsBinding } from '../../../utils.js';
 import { FlatControlFlow } from './controlFlow.js';
 import { outlineCallAsFunc as restructureCallAsFunc } from './restructure.js';
-import { blockStatement, expressionStatement, Statement } from '@babel/types';
 import UnhoistPass from '../UnhoistPass.js';
 
 function getWrappedFunc(controlFlow: FlatControlFlow, path: NodePath) {
@@ -111,6 +112,13 @@ function getWrappedFunc(controlFlow: FlatControlFlow, path: NodePath) {
 export default (path: NodePath): boolean => {
 	let changed = false;
 
+	let cfgCount = 0;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting');
+
 	path.traverse({
 		Function(flattenedFunc) {
 			if (!flattenedFunc.isFunctionDeclaration() && !flattenedFunc.isFunctionExpression()) return;
@@ -138,6 +146,7 @@ export default (path: NodePath): boolean => {
 				return;
 			}
 
+			logger.debug(`\tFound flattened CF #${++cfgCount}`);
 			const externalCalls = binding.referencePaths.flatMap(ref => {
 				if (flattenedFunc.isAncestor(ref)) return [];
 				let call = ref.parentPath;
@@ -275,6 +284,8 @@ export default (path: NodePath): boolean => {
 			}
 		}
 	});
+
+	logger.info('Done' + (changed ? ' with changes' : ''));
 
 	return changed;
 }

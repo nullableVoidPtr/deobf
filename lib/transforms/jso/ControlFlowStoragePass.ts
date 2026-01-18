@@ -1,5 +1,6 @@
 import * as t from '@babel/types';
 import { type Binding, type NodePath, type Scope } from '@babel/traverse';
+import globalLogger, { getPassName } from '../../logging.js';
 import { getParentingCall, inlineProxyCall, isLooselyConstantBinding, isRemoved, pathAsBinding } from '../../utils.js';
 import LiteralFoldPass from '../LiteralFoldPass.js';
 import DeadCodeRemovalPass from './DeadCodeRemovalPass.js';
@@ -9,6 +10,12 @@ export const repeatUntilStable = true;
 
 export default (path: NodePath): boolean => {
 	let changed = false;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
+
 	const state = {
 		parentScopes: new Map<Scope, {
 				binding: Binding;
@@ -265,6 +272,8 @@ export default (path: NodePath): boolean => {
 			},
 		},
 	}, state);
+
+	logger.info('Done' + (changed ? ' with changes' : ''));
 
 	return changed;
 };

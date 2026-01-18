@@ -1,4 +1,5 @@
 import { type Binding, type NodePath } from '@babel/traverse';
+import globalLogger, { getPassName } from '../../logging.js';
 import { asSingleStatement, pathAsBinding } from '../../utils.js';
 
 function isProperlyReferenced(binding: Binding) {
@@ -34,6 +35,11 @@ function isProperlyReferenced(binding: Binding) {
 
 export default (path: NodePath): boolean => {
 	let changed = false;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
 
 	const state = { deadFunctions: new Set<Binding>() };
 	path.traverse({
@@ -112,6 +118,8 @@ export default (path: NodePath): boolean => {
 		binding.path.remove();
 		changed = true;
 	}
+
+	logger.info('Done' + (changed ? ' with changes' : ''));
 
 	return changed;
 };

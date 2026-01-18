@@ -2,6 +2,7 @@ import * as t from '@babel/types';
 import { Binding, type NodePath } from '@babel/traverse';
 import { parse } from '@babel/parser';
 import _traverse from '@babel/traverse';
+import globalLogger, { getPassName } from '../../logging.js';
 import { asSingleStatement, getParentingCall, getPropertyName, pathAsBinding } from '../../utils.js';
 import * as DeadCodeRemovalPass from './DeadCodeRemovalPass.js';
 import * as BlockStatementPass from '../BlockStatementPass.js';
@@ -140,6 +141,11 @@ function liftRuntimeFunc(body: NodePath<t.Statement>[]): t.FunctionExpression | 
 
 export default (path: NodePath): boolean => {
 	let changed = false;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
 
 	path.traverse({
 		FunctionDeclaration(dummyFunc) {
@@ -461,6 +467,8 @@ export default (path: NodePath): boolean => {
 			arrayBinding.path.remove();
 		}
 	}
+
+	logger.info('Done' + (changed ? ' with changes' : ''));
 
 	return changed;
 };

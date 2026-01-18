@@ -1,6 +1,7 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
 import { parse } from '@babel/parser';
+import globalLogger, { getPassName } from '../../logging.js';
 import { asSingleStatement, getPropertyName } from '../../utils.js';
 import { crawlProperties } from '../../ObjectBinding.js';
 
@@ -61,6 +62,11 @@ function extractGlobalsObject(obj: NodePath<t.ObjectExpression>): {
 export default (path: NodePath): boolean => {
 	let changed = false;
 
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting');
+
 	path.traverse({
 		CallExpression(call) {
 			const innerFunc = call.get('callee');
@@ -78,6 +84,7 @@ export default (path: NodePath): boolean => {
 
 				const code = innerFuncSource.node.value;
 
+				logger.debug('Parsing...');
 				const innerFuncBody = parse(
 					code,
 					{
@@ -88,6 +95,7 @@ export default (path: NodePath): boolean => {
 					},
 				).program;
 
+				logger.debug('Replacing...');
 				const [newInnerFunc] = innerFunc.replaceWith(
 					t.functionExpression(
 						null,
@@ -228,12 +236,15 @@ export default (path: NodePath): boolean => {
 					}
 				}
 
+				logger.debug('Scope crawling...');
 				call.scope.crawl();
 			} catch {
 				return;
 			}
 		}
 	});
+
+	logger.info('Done' + (changed ? ' with changes' : ''));
 
 	return changed;
 };

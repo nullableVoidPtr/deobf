@@ -1,5 +1,6 @@
 import * as t from '@babel/types';
 import type { Binding, NodePath } from '@babel/traverse';
+import globalLogger, { getPassName } from '../../logging.js';
 import { dereferencePathFromBinding, getPropertyName, isRemoved, pathAsBinding } from '../../utils.js';
 import { filterBody } from './utils.js';
 
@@ -162,6 +163,11 @@ function liftFlatObj(flatObjBinding: Binding) {
 export default (path: NodePath): boolean => {
 	let changed = false;
 
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
+
 	path.traverse({
 		Function(func) {
 			const params = func.get('params');
@@ -276,6 +282,8 @@ export default (path: NodePath): boolean => {
 			}
 		}
 	});
+
+	logger.info('Done' + (changed ? ' with changes' : ''));
 
 	return changed;
 }

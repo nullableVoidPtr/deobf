@@ -1,5 +1,6 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
+import globalLogger, { getPassName } from '../../logging.js';
 import { pathAsBinding } from '../../utils.js';
 
 function extractArrayFromIIFE(call: NodePath<t.Expression | null | undefined>): NodePath<t.ArrayExpression> | null {
@@ -27,6 +28,11 @@ function extractArrayFromIIFE(call: NodePath<t.Expression | null | undefined>): 
 
 export default (path: NodePath): boolean => {
 	let changed = false;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
 
 	path.traverse({
 		SpreadElement: {
@@ -133,6 +139,8 @@ export default (path: NodePath): boolean => {
 			changed = true;
 		}
 	});
+
+	logger.info('Done' + (changed ? ' with changes' : ''));
 
 	return changed;
 };

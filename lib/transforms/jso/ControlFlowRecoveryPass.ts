@@ -1,6 +1,7 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
 import * as bq from 'babylon-query';
+import globalLogger, { getPassName } from '../../logging.js';
 import { dereferencePathFromBinding, pathAsBinding } from '../../utils.js';
 
 const dispatcherSelector = bq.parse(
@@ -15,6 +16,12 @@ const dispatcherSelector = bq.parse(
 
 export default (path: NodePath): boolean => {
 	let controlFlowRecovered = false;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
+
 	const execOrderMatches = <NodePath<t.VariableDeclarator>[]>(
 		bq.query(
 			path,
@@ -50,7 +57,8 @@ export default (path: NodePath): boolean => {
 				{}
 			);
 			if (!dispatcherMatched) {
-				throw new Error('unexpected dispatcher structure');
+				// throw new Error('unexpected dispatcher structure');
+				continue;
 			}
 			const ancestry = orderRef.getAncestry();
 			const loop = ancestry.find(
@@ -142,6 +150,8 @@ export default (path: NodePath): boolean => {
 			controlFlowRecovered = true;
 		}
 	}
+
+	logger.info('Done' + (controlFlowRecovered ? ' with changes' : ''));
 
 	return controlFlowRecovered;
 };

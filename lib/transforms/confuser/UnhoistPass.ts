@@ -1,5 +1,6 @@
 import * as t from '@babel/types';
 import { Binding, type NodePath } from '@babel/traverse';
+import globalLogger, { getPassName } from '../../logging.js';
 import { getCallLikeSites, pathAsBinding } from '../../utils.js';
 import { extractHoistedDecl } from './utils.js';
 
@@ -83,6 +84,11 @@ export function unhoistFunctionParams(func: NodePath<t.FunctionDeclaration | t.F
 
 export default (path: NodePath): boolean => {
 	let changed = false;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
 
 	path.traverse({
 		FunctionDeclaration(func) {
@@ -198,6 +204,8 @@ export default (path: NodePath): boolean => {
 			}
 		}
 	});
+
+	logger.info('Done' + (changed ? ' with changes' : ''));
 
 	return changed;
 };

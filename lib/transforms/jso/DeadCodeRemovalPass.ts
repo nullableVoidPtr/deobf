@@ -1,7 +1,14 @@
 import { type NodePath } from '@babel/traverse';
+import globalLogger, { getPassName } from '../../logging.js';
 
 export default (path: NodePath): boolean => {
 	let removed = false;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
+
 	path.traverse({
 		IfStatement(path) {
 			const test = path.get('test');
@@ -61,6 +68,8 @@ export default (path: NodePath): boolean => {
 			removed = true;
 		},
 	});
+
+	logger.info('Done' + (removed ? ' with changes' : ''));
 
 	return removed;
 };

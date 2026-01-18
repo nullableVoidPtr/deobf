@@ -1,5 +1,6 @@
 import { Binding, NodePath } from '@babel/traverse';
 import * as t from '@babel/types';
+import globalLogger, { getPassName } from '../../logging.js';
 import { asSingleStatement, dereferencePathFromBinding, getCallSites, getParentingCall, getPropertyName, isLooselyConstantBinding, isRemoved, pathAsBinding } from '../../utils.js';
 
 const DEFAULT_REPLACEMENT_REGEX = / |\n|;|,|\{|\}|\(|\)|\.|\[|\]/g;
@@ -205,6 +206,11 @@ function inlineProxyFunction(func: NodePath<t.FunctionDeclaration>) {
 export default (path: NodePath): boolean => {
 	let changed = false;
 
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
+
 	path.traverse({
 		VariableDeclarator(decl) {
 			const value = decl.get('init');
@@ -297,6 +303,8 @@ export default (path: NodePath): boolean => {
 			binding.path.remove();
 		}
 	}
+
+	logger.info('Done' + (changed ? ' with changes' : ''));
 
 	return changed;
 }

@@ -1,5 +1,6 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
+import globalLogger, { getPassName } from '../logging.js';
 
 function fixupMember(path: NodePath<t.Method | t.Property>) {
 	const key = path.get('key');
@@ -17,6 +18,12 @@ function fixupMember(path: NodePath<t.Method | t.Property>) {
 
 export default (path: NodePath): boolean => {
 	let replaced = false;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
+
 	path.traverse({
 		MemberExpression(path) {
 			const property = path.get('property');
@@ -35,5 +42,8 @@ export default (path: NodePath): boolean => {
 			replaced = fixupMember(path) || replaced;
 		},
 	});
+
+	logger.info('Done' + (replaced ? ' with changes' : ''));
+
 	return replaced;
 };

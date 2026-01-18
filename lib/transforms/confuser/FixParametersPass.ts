@@ -1,8 +1,14 @@
 import { type NodePath } from '@babel/traverse';
 import { FunctionDeclaration } from '@babel/types';
+import globalLogger, { getPassName } from '../../logging.js';
 
 export default (path: NodePath): boolean => {
 	let changed = false;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
 
 	path.traverse({
 		Function(path) {
@@ -42,6 +48,8 @@ export default (path: NodePath): boolean => {
 			changed = true;
 		},
 	});
+
+	logger.info('Done' + (changed ? ' with changes' : ''));
 
 	return changed;
 }

@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
-import { type NodePath } from '@babel/traverse';
-import _traverse from '@babel/traverse';
+import _traverse, { type NodePath } from '@babel/traverse';
+import globalLogger, { getPassName } from '../../logging.js';
 import { asSingleStatement, dereferencePathFromBinding, getCallSites, getParentingCall, getPropertyName, isRemoved, pathAsBinding } from '../../utils.js';
 import { filterBody, extractDateCheck, extractDomainLock } from './utils.js';
 
@@ -18,6 +18,11 @@ function isDefaultCountermeasure(path: NodePath): boolean {
 
 export default (path: NodePath) => {
 	let changed = false;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
 
 	const state = {
 		dateChecks: new Set<string>(),
@@ -228,6 +233,8 @@ export default (path: NodePath) => {
 			false,
 		)
 	}
+
+	logger.info('Done' + (changed ? ' with changes' : ''));
 
 	return changed;
 }

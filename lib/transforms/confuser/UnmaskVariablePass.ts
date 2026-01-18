@@ -1,5 +1,6 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
+import globalLogger, { getPassName } from '../../logging.js';
 import UnhoistPass from './UnhoistPass.js';
 import { dereferencePathFromBinding, getCallSites, getPropertyName, isRemoved, pathAsBinding } from '../../utils.js';
 import { crawlProperties } from '../../ObjectBinding.js';
@@ -24,6 +25,11 @@ function getFunctionLength(path: NodePath, argsId: string | undefined) {
 
 export default (path: NodePath): boolean => {
 	let changed = false;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
 
 	path.traverse({
 		FunctionDeclaration(maskFunc) {
@@ -236,6 +242,8 @@ export default (path: NodePath): boolean => {
 	});
 
 	path.scope.crawl();
+
+	logger.info('Done' + (changed ? ' with changes' : ''));
 
 	return changed;
 }

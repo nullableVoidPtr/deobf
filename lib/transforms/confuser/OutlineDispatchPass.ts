@@ -1,5 +1,6 @@
 import * as t from '@babel/types';
 import { type Binding, type NodePath } from '@babel/traverse';
+import globalLogger, { getPassName } from '../../logging.js';
 import { asSingleStatement, dereferencePathFromBinding, getCallLikeSites, getPropertyName, isRemoved, pathAsBinding } from '../../utils.js';
 import { filterBody } from './utils.js';
 import { unhoistFunctionParams } from './UnhoistPass.js';
@@ -63,6 +64,11 @@ function fixDispatchedFunction(func: NodePath<t.FunctionExpression>, newFuncName
 
 export default (path: NodePath): boolean => {
 	let changed = false;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
 
 	path.traverse({
 		ObjectExpression(funcsObj) {
@@ -334,6 +340,8 @@ export default (path: NodePath): boolean => {
 			}
 		}
 	});
+
+	logger.info('Done' + (changed ? ' with changes' : ''));
 
 	return changed;
 };

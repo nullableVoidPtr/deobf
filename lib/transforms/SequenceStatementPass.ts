@@ -1,5 +1,6 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
+import globalLogger, { getPassName } from '../logging.js';
 
 type CheckFunction<T extends t.Node> = (
 	ancestor: NodePath<T>,
@@ -113,6 +114,12 @@ export const repeatUntilStable = true;
 
 export default (path: NodePath): boolean => {
 	const changed = false;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting');
+
 	path.traverse({
 		SequenceExpression(path) {
 			const { parentPath } = path;
@@ -122,6 +129,9 @@ export default (path: NodePath): boolean => {
 				throw new Error();
 			}
 			const lastExpressionNode = lastExpression.node;
+
+			// Handle indirect evaluations
+			if (firstExpressions.length === 1 && firstExpressions[0].isLiteral() && path.parentPath?.isCallExpression()) return;
 
 			const newStatements = firstExpressions.map(p => t.expressionStatement(p.node));
 
@@ -203,6 +213,8 @@ export default (path: NodePath): boolean => {
 			}
 		}
 	});
+
+	logger.info('Done' + (changed ? ' with changes' : ''));
 
 	return changed;
 };

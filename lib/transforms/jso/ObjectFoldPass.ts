@@ -1,12 +1,18 @@
 import * as t from '@babel/types';
 import { type NodePath } from '@babel/traverse';
+import globalLogger, { getPassName } from '../../logging.js';
 import { dereferencePathFromBinding, pathAsBinding } from '../../utils.js';
-
 
 export const repeatUntilStable = true;
 
 export default (path: NodePath): boolean => {
 	let folded = false;
+
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+	logger.debug('Starting...');
+
 	path.traverse({
 		VariableDeclarator(path) {
 			const stmt = path.findParent(p => p.isStatement());
@@ -162,6 +168,8 @@ export default (path: NodePath): boolean => {
 			}
 		},
 	});
+
+	logger.info('Done' + (folded ? ' with changes' : ''));
 
 	return folded;
 };

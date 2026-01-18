@@ -21,11 +21,19 @@ function inlineFunction(concealFunction: NodePath<t.FunctionDeclaration>, objId:
 		const value = last.get('argument');
 		if (!value.isMemberExpression() || !value.get('object').isIdentifier({ name: objId })) return;
 
-		if (value.node.computed) return;
 		const property = value.get('property');
-		if (!property.isIdentifier()) return;
+		if (value.node.computed) {
+			if (!property.isStringLiteral()) return;
+			if (!t.isValidIdentifier(property.node.value)) return;
 
-		concealMapping.set(discriminant.node.value, property.node);
+			const id = t.identifier(property.node.value);
+			id.loc = property.node.loc;
+			concealMapping.set(discriminant.node.value, property.replaceWith(id)[0].node);
+		} else if (property.isIdentifier()) {
+			concealMapping.set(discriminant.node.value, property.node);
+		} else {
+			return;
+		}
 	}
 
 	for (const {call, ref} of getCallSites(concealBinding)) {

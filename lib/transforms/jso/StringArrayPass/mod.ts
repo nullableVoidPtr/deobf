@@ -1,5 +1,6 @@
 import * as t from '@babel/types';
 import { type Binding, type NodePath } from '@babel/traverse';
+import globalLogger, { getPassName } from '../../../logging.js';
 import { dereferencePathFromBinding, getParentingCall } from '../../../utils.js';
 import findStringArrayCandidates from './array.js';
 import findDecoders, { DecoderInfo, DecoderOptions } from './decoder.js';
@@ -56,6 +57,11 @@ export function withOptions(options?: {
 }) {
 	return {
 		default: (path: NodePath): boolean => {
+			const logger = globalLogger.child({
+				'pass': getPassName(import.meta.url),
+			});
+			logger.debug('Starting...');
+
 			const candidates = findStringArrayCandidates(path);
 			if (candidates === null) {
 				return false;
@@ -73,6 +79,8 @@ export function withOptions(options?: {
 
 			removeDecoders(decoders);
 			replaceDecoderCalls(decoders);
+
+			logger.info('Done');
 
 			return true;
 		},

@@ -3,6 +3,20 @@ import { type NodePath } from '@babel/traverse';
 
 export const repeatUntilStable = true;
 
+function isInfinityOrNaN(path: NodePath<t.Expression>): boolean {
+	if (
+		path.isBinaryExpression({ operator: '/' }) &&
+		path.get('right').isNumericLiteral({ value: 0 })
+	) {
+		const left = path.get('left');
+		if (left.isNumericLiteral() && [0, 1].includes(left.node.value)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 function isPureExpression(path: NodePath<t.Expression>): boolean {
 	if (path.isLiteral()) {
 		if (path.isTemplateLiteral()) {
@@ -96,15 +110,12 @@ export default (path: NodePath): boolean => {
 				path.get('argument').isNumericLiteral()
 			)
 				return;
+			if (isInfinityOrNaN(path)) return;
 			if (
-				path.isBinaryExpression({ operator: '/' }) &&
-				path.get('right').isNumericLiteral({ value: 0 })
-			) {
-				const left = path.get('left');
-				if (left.isNumericLiteral() && [0, 1].includes(left.node.value)) {
-					return;
-				}
-			}
+				path.isUnaryExpression({ operator: '-' }) &&
+				isInfinityOrNaN(path.get('argument'))
+			)
+				return;
 
 			if (isPureExpression(path)) {
 				evaluatable.push(path);

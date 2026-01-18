@@ -19,6 +19,7 @@
 		"base64-arraybuffer": "^1.0.2",
 		"graphology": "^0.26.0",
 		"lz-string": "^1.5.0",
+		"winston": "^3.19.0",
 		"yargs": "^17.7.2"
 	},
 	"devDependencies": {
