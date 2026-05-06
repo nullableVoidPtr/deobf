@@ -5,7 +5,7 @@ import globalLogger, { getPassName } from '../../../logging.js';
 import { filterBody, extractHoistedDecl } from '../utils.js';
 import { asSingleStatement, dereferencePathFromBinding, getPropertyName, isUndefined, pathAsBinding } from '../../../utils.js';
 import { FlatControlFlow } from './controlFlow.js';
-import { outlineCallAsFunc as restructureCallAsFunc } from './restructure.js';
+import { restructureCallAsFunc } from './restructure.js';
 import UnhoistPass from '../UnhoistPass.js';
 
 function getWrappedFunc(controlFlow: FlatControlFlow, path: NodePath) {
@@ -165,13 +165,21 @@ export default (path: NodePath): boolean => {
 
 				return [{ref, call}];
 			});
+
+			let missed = false;
 			for (const {ref, call} of externalCalls) {
 				const flattenedReturn = getWrappedFunc(flatControlFlow, call);
 
-				const result = restructureCallAsFunc(flatControlFlow, call, {
-					inlineTarget: call,
-				});
-				if (!result) continue; // throw new Error();
+				let result;
+				try {
+					result = restructureCallAsFunc(flatControlFlow, call, {
+						inlineTarget: call,
+					});
+				} catch (e) {
+					logger.warn('Unable to restructure CFF call', e);
+					missed = true;
+					continue;
+				}
 				
 				const {outlinedFunc, call: newCall, functionScopePredicates: programScopePredicates} = result;
 
@@ -276,6 +284,8 @@ export default (path: NodePath): boolean => {
 					changed = true;
 				}
 			}
+
+			if (missed) return;
 
 			flattenedFunc.parentPath.scope.crawl();
 			if (!binding.path.removed && binding.referencePaths.every(ref => flattenedFunc.isAncestor(ref) || toRemove.every(p => p.isAncestor(ref)))) {

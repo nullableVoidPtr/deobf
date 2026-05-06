@@ -26,6 +26,7 @@ export default TargetComposer([
 	ConfuserPasses.StringPass,
 	LiteralFoldPass,
 	DotNotationPass,
+	ConfuserPasses.FixParametersPass,
 	ConfuserPasses.GlobalObjectPass,
 	ConfuserPasses.CalculatorInlinePass,
 	ConfuserPasses.DummyFunctionPass,

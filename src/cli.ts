@@ -6,10 +6,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import yargs from 'yargs';
 import { Target } from '../lib/targets/TargetComposer.js';
 
-// eslint-disable-next-line  @typescript-eslint/no-explicit-any
-const traverse: typeof _traverse = (_traverse as any).default;
-// eslint-disable-next-line  @typescript-eslint/no-explicit-any
-const generate: typeof _generate = (_generate as any).default;
+const traverse = _traverse.default;
+const generate = _generate.default;
 
 export default (target: Target, description: string) => {
 	const argv = yargs(process.argv.slice(2))

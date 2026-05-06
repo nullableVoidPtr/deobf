@@ -5,10 +5,8 @@ import { type NodePath } from '@babel/traverse';
 import _generate from '@babel/generator';
 import { Target } from '../lib/targets/TargetComposer.js';
 
-// eslint-disable-next-line  @typescript-eslint/no-explicit-any
-const traverse: typeof _traverse = (_traverse as any).default;
-// eslint-disable-next-line  @typescript-eslint/no-explicit-any
-const generate: typeof _generate = (_generate as any).default;
+const traverse = _traverse.default;
+const generate = _generate.default;
 
 export function makeDeobfuscator(target: Target) {
 	return (source: string) => {

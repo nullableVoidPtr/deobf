@@ -2,8 +2,7 @@ import * as t from '@babel/types';
 import _traverse, { type Binding, type NodePath } from '@babel/traverse';
 import { filterBody } from './transforms/confuser/utils.js';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const traverse: typeof _traverse = (<any>_traverse).default;
+const traverse = _traverse.default;
 
 export function isUndefined(path: NodePath<t.Node | null | undefined>) {
 	if (path.isIdentifier({ name: 'undefined' })) return true;

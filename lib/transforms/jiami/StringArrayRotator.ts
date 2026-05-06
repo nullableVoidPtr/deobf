@@ -4,8 +4,7 @@ import _traverse, { type Binding, type NodePath } from '@babel/traverse';
 import { asSingleStatement, dereferencePathFromBinding } from '../../utils.js';
 import { DecoderInfo } from '../jso/StringArrayPass/decoder.js';
 
-// eslint-disable-next-line  @typescript-eslint/no-explicit-any
-const traverse: typeof _traverse = (_traverse as any).default;
+const traverse = _traverse.default;
 
 function isRotatePredicate(expression: NodePath<t.Expression>): boolean {
 	if (expression.isLiteral()) {

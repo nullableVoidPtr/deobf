@@ -5,8 +5,7 @@ import { dereferencePathFromBinding, pathAsBinding, removeIIFE } from '../../../
 import { DecoderInfo } from './decoder.js';
 import { fixCFStorage } from './storage.js';
 
-// eslint-disable-next-line  @typescript-eslint/no-explicit-any
-const traverse: typeof _traverse = (_traverse as any).default;
+const traverse = _traverse.default;
 
 function isRotatePredicate(expression: NodePath<t.Expression>): boolean {
 	if (expression.isLiteral()) {

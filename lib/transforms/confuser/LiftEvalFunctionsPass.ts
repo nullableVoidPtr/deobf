@@ -23,8 +23,7 @@ import * as UnflattenControlFlowPass from './UnflattenControlFlowPass/mod.js';
 import { filterBody } from './utils.js';
 import * as FixParametersPass from './FixParametersPass.js';
 
-// eslint-disable-next-line  @typescript-eslint/no-explicit-any
-const traverse: typeof _traverse = (_traverse as any).default;
+const traverse = _traverse.default;
 
 const innerTarget = TargetComposer([
 	BlockStatementPass,

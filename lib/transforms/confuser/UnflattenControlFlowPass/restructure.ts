@@ -2,16 +2,16 @@ import * as t from '@babel/types';
 import { Visitor, type NodePath } from '@babel/traverse';
 import _traverse from '@babel/traverse';
 import { MultiDirectedGraph } from 'graphology';
+import globalLogger, { getPassName } from '../../../logging.js';
 import { asSingleStatement, getParentingCall, getPropertyName, isUndefined, pathAsBinding } from '../../../utils.js';
 import ControlFlowGraph, { CFGAttributes, Edge, NormalizedBlock, reduceSimple } from '../../../control-flow/mod.js';
 import { FlatControlFlow } from './controlFlow.js';
 import FixParametersPass from '../FixParametersPass.js';
+import UnhoistPass from '../UnhoistPass.js';
 
-// eslint-disable-next-line  @typescript-eslint/no-explicit-any
-const traverse: typeof _traverse = (_traverse as any).default;
+const traverse = _traverse.default;
 
 import _generate from '@babel/generator';
-void _generate;
 
 interface SuccessorInfo {
 	switchCase: NodePath<t.SwitchCase>;
@@ -67,7 +67,10 @@ function matchBlock(controlFlow: FlatControlFlow, states: Record<string, number>
 }
 
 interface GotoInfo {
-	stateDeltas: Record<string, number>;
+	stateUpdates: {
+		stateId: string;
+		expr: t.Expression;
+	}[];
 	newWithScope: NodePath | null;
 }
 
@@ -94,6 +97,30 @@ function isStatePredicate(controlFlow: FlatControlFlow, path: NodePath<t.Express
 	}
 
 	return false;
+}
+
+function evaluateStateExpression(expr: t.Expression, stateValues: Record<string, number>): number | null {
+	const wrappedExpr = t.expressionStatement(t.cloneNode(expr, true));
+	const state: { result: number | null } = { result: null };
+
+	traverse(t.file(t.program([wrappedExpr])), {
+		ReferencedIdentifier(path) {
+			const value = stateValues[path.node.name];
+			if (value === undefined) return;
+
+			path.replaceWith(t.numericLiteral(value));
+		},
+		ExpressionStatement: {
+			exit(path) {
+				const evaluation = path.get('expression').evaluate();
+				if (!evaluation.confident || typeof evaluation.value !== 'number') return;
+
+				this.result = evaluation.value;
+			},
+		},
+	}, undefined, state);
+
+	return state.result;
 }
 
 class LiftedBlock {
@@ -178,12 +205,9 @@ class LiftedBlock {
 				}
 
 				const goto: GotoInfo = {
-					stateDeltas: {},
+					stateUpdates: [],
 					newWithScope: null,
 				};
-				for (const stateId of this.controlFlow.stateParams) {
-					goto.stateDeltas[stateId] = 0;
-				}
 				this.gotos.set(breakStmt, goto);
 
 				let current = breakStmt.getPrevSibling();
@@ -202,24 +226,41 @@ class LiftedBlock {
 							const stateVar = expr.get('argument');
 							if (!stateVar.isIdentifier() || !this.controlFlow.stateParams.includes(stateVar.node.name)) break;
 
-							goto.stateDeltas[stateVar.node.name] += 1;
+							goto.stateUpdates.unshift({
+								stateId: stateVar.node.name,
+								expr: t.binaryExpression(
+									'+',
+									t.identifier(stateVar.node.name),
+									t.numericLiteral(1),
+								),
+							});
 						} else if (expr.isAssignmentExpression({ operator: '+=' })) {
 							const stateVar = expr.get('left');
 							if (!stateVar.isIdentifier() || !this.controlFlow.stateParams.includes(stateVar.node.name)) break;
 
 							const deltaPath = expr.get('right');
-							const evaluation = deltaPath.evaluate();
-							if (!evaluation.confident) break;
-							const deltaValue = evaluation.value;
-							if (typeof deltaValue !== 'number') break;
-							
-							goto.stateDeltas[stateVar.node.name] += deltaValue;
+							goto.stateUpdates.unshift({
+								stateId: stateVar.node.name,
+								expr: t.binaryExpression(
+									'+',
+									t.identifier(stateVar.node.name),
+									t.cloneNode(deltaPath.node, true),
+								),
+							});
 						} else if (expr.isAssignmentExpression({ operator: '=' })) {
-							if (!expr.get('left').matchesPattern(
-								`${this.controlFlow.scopeBinding.identifier.name}.${this.controlFlow.optionalWithScopeKey}`
-							)) break;
-							if (!goto.newWithScope) {
-								goto.newWithScope = expr.get('right');
+							const left = expr.get('left');
+							if (left.isIdentifier() && this.controlFlow.stateParams.includes(left.node.name)) {
+								goto.stateUpdates.unshift({
+									stateId: left.node.name,
+									expr: t.cloneNode(expr.get('right').node, true),
+								});
+							} else {
+								if (!left.matchesPattern(
+									`${this.controlFlow.scopeBinding.identifier.name}.${this.controlFlow.optionalWithScopeKey}`
+								)) break;
+								if (!goto.newWithScope) {
+									goto.newWithScope = expr.get('right');
+								}
 							}
 						} else {
 							break;
@@ -357,28 +398,51 @@ class LiftedBlock {
 		}
 
 		const reifySuccessor = (jump: GotoInfo): SuccessorInfo | null => {
-			const newStateValues: Record<string, number> = {};
+			const newStateValues: Record<string, number> = { ...this.stateValues };
 			for (const stateId of this.controlFlow.stateParams) {
-				newStateValues[stateId] = this.stateValues[stateId] + (jump.stateDeltas[stateId] ?? 0);
+				if (!(stateId in newStateValues)) throw new Error();
+			}
+
+			for (const update of jump.stateUpdates) {
+				const nextValue = evaluateStateExpression(update.expr, newStateValues);
+				if (nextValue === null) throw new Error();
+
+				newStateValues[update.stateId] = nextValue;
 			}
 
 			const sum = Object.values(newStateValues).reduce((a, b) => a + b);
 			if (sum === this.controlFlow.stopState) return null;
 
+			function deepMerge(old: Record<string, any>, delta: Record<string, any>) {
+				const result = { ...old };
+
+				for (const key of Object.keys(delta)) {
+					if (
+						delta[key] && typeof delta[key] === 'object' && !Array.isArray(delta[key]) &&
+						old[key] && typeof old[key] === 'object' && !Array.isArray(old[key])
+					) {
+						result[key] = deepMerge(old[key], delta[key]);
+					} else {
+						result[key] = delta[key];
+					}
+				}
+
+				return result;
+			}
+
+			const newScopePredicates = deepMerge(this.scopePredicates, this.scopePredicateDeltas);
+
 			const successorCase = matchBlock(
 				this.controlFlow,
 				newStateValues,
-				{
-					...this.scopePredicates,
-					...this.scopePredicateDeltas,
-				},
+				newScopePredicates,
 			);
 			if (!successorCase) throw new Error();
 
 			return {
 				switchCase: successorCase,
 				stateValues: newStateValues,
-				scopePredicates: { ...this.scopePredicates, ...this.scopePredicateDeltas },
+				scopePredicates: newScopePredicates,
 				withScope: jump.newWithScope,
 				visibleScopes: this.visibleScopes,
 				declaredFuncs: this.declaredFuncs,
@@ -624,7 +688,7 @@ class LiftedBlock {
 	}
 }
 
-export function outlineCallAsFunc(
+export function restructureCallAsFunc(
 	controlFlow: FlatControlFlow,
 	path: NodePath,
 	{
@@ -642,16 +706,23 @@ export function outlineCallAsFunc(
 	outlinedFunc: NodePath<t.FunctionDeclaration | t.FunctionExpression>;
 	call?: NodePath<t.CallExpression> | null;
 	functionScopePredicates: Record<string, object>;
-} | null {
+} {
+	const logger = globalLogger.child({
+		'pass': getPassName(import.meta.url),
+	});
+
 	if (!scopePredicates) {
 		scopePredicates = {};
 	}
 	if (!insertBefore) {
 		insertBefore = controlFlow.flattenedFunc;
 	}
-	if (!path.isCallExpression()) return null;
+	if (!path.isCallExpression()) {
+		logger.error('Unknown CFF call', path.toString());
+		throw new Error('call is not a CallExpression');
+	}
 	const args = path.get('arguments');
-	if (args.length < controlFlow.stateParams.length) return null;
+	if (args.length < controlFlow.stateParams.length) throw new Error('mismatching arguments passed to function');
 
 	const initStateValues: Record<string, number> = {};
 	for (let i = 0; i < controlFlow.stateParams.length; i++) {
@@ -659,9 +730,15 @@ export function outlineCallAsFunc(
 		const stateId = controlFlow.stateParams[i];
 
 		const evaluation = arg.evaluate();
-		if (!evaluation.confident) return null;
+		if (!evaluation.confident) {
+			logger.error('Unevaluated argument', arg.toString());
+			throw new Error('unable to evaluate argument');
+		}
 		const stateValue = evaluation.value;
-		if (typeof stateValue !== 'number') return null;
+		if (typeof stateValue !== 'number') {
+			logger.error('Unevaluated argument', stateValue);
+			throw new Error('evaluated argument is not a number');
+		}
 
 		initStateValues[stateId] = stateValue;
 	}
@@ -677,7 +754,10 @@ export function outlineCallAsFunc(
 	const [scopeObj = null, argArray = null] = args.slice(controlFlow.stateParams.length);
 	const outlinedArgs = [];
 	if (argArray) {
-		if (!argArray.isExpression()) return null;
+		if (!argArray.isExpression()) {
+			logger.error('Unknown CFF argument', argArray.toString());
+			throw new Error('argument is not Expression');
+		}
 		outlinedArgs.push(t.spreadElement(argArray.node));
 	}
 
@@ -715,7 +795,10 @@ export function outlineCallAsFunc(
 		);
 
 		const callee = call.get('callee');
-		if (!callee.isFunctionExpression()) return null;
+		if (!callee.isFunctionExpression()) {
+			logger.error('Unknown cached callee', callee.toString());
+			throw new Error('cached callee is not FunctionExpression');
+		}
 
 		return {
 			outlinedFunc: callee,
@@ -727,16 +810,24 @@ export function outlineCallAsFunc(
 	const entryScopes = new Set<string>();
 	const potentialFuncScopes = new Set<string>();
 	if (scopeObj) {
-		if (!scopeObj.isObjectExpression()) return null;
+		if (!scopeObj.isObjectExpression()) {
+			throw new Error('scope object is not an ObjectExpression')
+		}
 		for (const property of scopeObj.get('properties')) {
-			if (!property.isObjectProperty()) return null;
+			if (!property.isObjectProperty()) {
+				throw new Error('scope property is improper')
+			}
 			const scopeName = getPropertyName(property);
-			if (scopeName === null) return null;
+			if (scopeName === null) {
+				throw new Error('cannot extract property name');
+			}
 			entryScopes.add(scopeName)
 
 			const value = property.get('value');
 			if (scopeName === controlFlow.mainScopeName) {
-				if (!value.matchesPattern(`${controlFlow.scopeBinding.identifier.name}.${controlFlow.mainScopeName}`)) return null;
+				if (!value.matchesPattern(`${controlFlow.scopeBinding.identifier.name}.${controlFlow.mainScopeName}`)) {
+					throw new Error('improper scope reference');
+				}
 				continue;
 			}
 
@@ -744,9 +835,15 @@ export function outlineCallAsFunc(
 
 			if (value.isObjectExpression() && value.node.properties.length === 0) continue;
 
-			if (!value.isMemberExpression()) return null;
-			if (!value.get('object').isIdentifier({ name: controlFlow.scopeBinding.identifier.name })) return null;
-			if (getPropertyName(value) !== scopeName) return null;
+			if (!value.isMemberExpression()) {
+				throw new Error('value is not MemberExpression');
+			}
+			if (!value.get('object').isIdentifier({ name: controlFlow.scopeBinding.identifier.name })) {
+				throw new Error('scope object is impropert');
+			}
+			if (getPropertyName(value) !== scopeName) {
+				throw new Error('mismatching scope names');
+			}
 		}
 	}
 
@@ -795,7 +892,9 @@ export function outlineCallAsFunc(
 				declaredFuncs,
 			},
 		} = queue.pop()!;
-		if (!switchCase) return null;
+		if (!switchCase) {
+			throw new Error('no switch case');
+		}
 		const caseId = controlFlow.caseOrder.get(switchCase);
 		if (caseId == undefined) throw new Error();
 
@@ -822,7 +921,26 @@ export function outlineCallAsFunc(
 		}
 
 		const lifted = new LiftedBlock(controlFlow, switchCase, stateValues, scopePredicates, visibleScopes, declaredFuncs);
-		const { successors } = lifted;
+		let cfgBlock = lifted.cfgBlock;
+		let successors = lifted.successors;
+		if (cfgBlock.test && successors.length === 2 && successors.some(successor => successor === null)) {
+			const [consequent] = successors;
+			const stopTest = consequent === null
+				? t.cloneNode(cfgBlock.test, true)
+				: t.unaryExpression('!', t.cloneNode(cfgBlock.test, true));
+
+			cfgBlock = {
+				beforeStatements: [
+					...cfgBlock.beforeStatements,
+					t.ifStatement(
+						stopTest,
+						t.blockStatement([t.returnStatement()]),
+					),
+				],
+				test: null,
+			};
+			successors = successors.filter((successor): successor is SuccessorInfo => successor !== null);
+		}
 		const succeedingWithScopes = new Set(successors.flatMap((successor) => {
 			if (successor === null) return [];
 			const { withScope } = successor;
@@ -848,7 +966,7 @@ export function outlineCallAsFunc(
 		}
 
 		caseCFG.addNode(caseId, {
-			...lifted.cfgBlock,
+			...cfgBlock,
 			stateValues,
 			withScope: currentWithScope,
 			funcScope,
@@ -910,19 +1028,14 @@ export function outlineCallAsFunc(
 
 	const funcBody: t.Statement[] = [];
 	
-	try {
-		const funcCFG = new ControlFlowGraph(caseCFG);
-		reduceSimple(funcCFG);
+	const funcCFG = new ControlFlowGraph(caseCFG);
+	reduceSimple(funcCFG);
 
-		if (funcCFG.order === 1) {
-			const [node] = funcCFG.nodes();
-			funcBody.push(...funcCFG.getNodeAttribute(node, 'beforeStatements'))
-		} else {
-			// throw new Error();
-			return null;
-		}
-	} catch {
-		return null;
+	if (funcCFG.order === 1) {
+		const [node] = funcCFG.nodes();
+		funcBody.push(...funcCFG.getNodeAttribute(node, 'beforeStatements'))
+	} else {
+		throw new Error('Unable to fully reduce function');
 	}
 
 	let target: NodePath<t.Expression> = path;
@@ -1025,6 +1138,7 @@ export function outlineCallAsFunc(
 	}
 
 	FixParametersPass(outlinedFunc);
+	UnhoistPass(outlinedFunc);
 
 	controlFlow.entrypoints.push([
 		controlFlow.stateParams.map(id => initStateValues[id]),
